@@ -1,0 +1,17 @@
+{
+  "Welcome back, Kai",
+  "Welcome, disciples",
+  "Hey cutie ;-)",
+  "ICEJJPICK!?",
+  "ADHD squad B-)",
+  "TWO CUTIES!? AT MY BASE!?",
+  "What's up CS squad!",
+  "We're divorced",
+  "Hey sexy men ;-)",
+  "Greetings, fellow dwarves",
+  "Divorce didn't last long?",
+  "Aww, man",
+  "Threesome?",
+  "Fellowship of the Goop",
+  "I love y'all",
+}

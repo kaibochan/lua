@@ -1,0 +1,6 @@
+shell.run("pastebin get https://pastebin.com/iRWPsRfd pastebins.txt")
+shell.run("pastebin get https://pastebin.com/Uh1xQSJj reload.lua")
+shell.run("reload \"nav.lua\"")
+shell.run("reload \"mine.lua\"")
+shell.run("reload \"mineregion.lua\"")
+shell.run("reload \"listen.lua\"")

@@ -1,0 +1,77 @@
+{
+  {
+    scale = 1.5,
+    bgColor = "black",
+    textColor = "lime",
+  },
+  {
+    scale = 1.5,
+    bgColor = "black",
+    textColor = "yellow",
+  },
+  {
+    scale = 2,
+    bgColor = "black",
+    textColor = "pink",
+  },
+  {
+    scale = 2,
+    bgColor = "white",
+    textColor = "purple",
+  },
+  {
+    scale = 2,
+    bgColor = "black",
+    textColor = "red",
+  },
+  {
+    scale = 1,
+    bgColor = "white",
+    textColor = "red",
+  },
+  {
+    scale = 1.5,
+    bgColor = "black",
+    textColor = "lightBlue",
+  },
+  {
+    scale = 2,
+    bgColor = "white",
+    textColor = "red",
+  },
+  {
+    scale = 1.5,
+    bgColor = "black",
+    textColor = "pink",
+  },
+  {
+    scale = 1,
+    bgColor = "black",
+    textColor = "yellow",
+  },
+  {
+    scale = 1,
+    bgColor = "black",
+    textColor = "magenta",
+  },
+  {
+    scale = 2,
+    bgColor = "white",
+    textColor = "green",
+  },
+  {
+    scale = 2,
+    bgColor = "pink",
+    textColor = "red",
+  },
+  {
+    scale = 1.5,
+    bgColor = "black",
+    textColor = "cyan",
+  },
+  {
+    scale = 2,
+    bgColor = "pink",
+    textColor = "black",
+  },
+}
