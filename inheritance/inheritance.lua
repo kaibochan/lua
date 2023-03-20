@@ -26,18 +26,35 @@ Element = {
     y = 1,
     width = 1,
     height = 1,
+    backgroundColor = colors.black,
+    transparentBackground = false,
     cells = {},
 }
     
 function Element:new (o)
     o = o or {}
+
+    --tables are passed by reference so new ones must be created if not passed in
+    o.cells = o.cells or {}
+    o.children = o.children or {}
+
     setmetatable(o, self)
     self.__index = self
 
+    if o.parent then
+        table.insert(o.parent.children, o)
+    end
+
+    local cell
+
     for x = 1, o.width do
-        table.insert(o.cells, x, {})
         for y = 1, o.height do
-            table.insert(o.cells[x], y, Cell:new{})
+            cell = Cell:new{backgroundColor = o.backgroundColor}
+            if not o.cells[x] then
+                table.insert(o.cells, x, {[y] = cell})
+            else
+                table.insert(o.cells[x], y, cell)
+            end
         end
     end
 
@@ -45,12 +62,41 @@ function Element:new (o)
 end
 
 function Element:draw()
-    for x = 1, self.width do
-        for y = 1, self.height do
-            term.setCursorPos(x, y)
-            term.setBackgroundColor(self.cells[x][y].backgroundColor)
-            term.setTextColor(self.cells[x][y].textColor)
-            term.write(self.cells[x][y].character)
+    for _, child in ipairs(self.children) do
+        child:draw()
+    end
+
+    local px, py
+
+    --code is repeated here so we don't run the parent check (width * height) times, only once
+    if self.parent then
+        --lx and ly are local x, y within an element
+        for lx = 1, self.width do
+            for ly = 1, self.height do
+                --px and py are x, y within parent element
+                px = lx + self.x - 1
+                py = ly + self.y - 1
+
+                if not self.transparentBackground then
+                    self.parent.cells[px][py].backgroundColor = self.cells[lx][ly].backgroundColor
+                end
+                self.parent.cells[px][py].textColor = self.cells[lx][ly].textColor
+                self.parent.cells[px][py].character = self.cells[lx][ly].character
+            end
+        end
+    else
+        --lx and ly are local x, y within an element
+        for lx = 1, self.width do
+            for ly = 1, self.height do
+                --px and py are x, y within parent element
+                px = lx + self.x - 1
+                py = ly + self.y - 1
+
+                term.setCursorPos(px, py)
+                term.setBackgroundColor(self.cells[lx][ly].backgroundColor)
+                term.setTextColor(self.cells[lx][ly].textColor)
+                term.write(self.cells[lx][ly].character)
+            end
         end
     end
 end
@@ -61,8 +107,6 @@ Text = Element:new{
     horizontalAlignment = align.left,
     verticalAlignment = align.top,
     textColor = colors.white,
-    transparentBackground = false,
-    backgroundColor = colors.black,
 }
 
 function Text:new(o)
@@ -95,7 +139,7 @@ function Text:new(o)
         end
         
         if newLineIndex and newLineIndex < stringEnd then
-            substring = o.text:sub(stringBegin, newLineIndex)
+            substring = o.text:sub(stringBegin, newLineIndex - 1)
             stringBegin = newLineIndex + 1
         else
             substring = o.text:sub(stringBegin, stringEnd)
@@ -133,7 +177,7 @@ function Text:new(o)
     for y = 1, o.height do
         if y > verticalOffset and y <= verticalOffset + #textRows then
             substringIndex = 1
-            
+
             for x = 1, o.width do
                 if x > horizontalOffsets[rowIndex] and x <= horizontalOffsets[rowIndex] + #textRows[rowIndex] then
                     o.cells[x][y].character = textRows[rowIndex]:sub(substringIndex, substringIndex)
@@ -148,14 +192,35 @@ function Text:new(o)
     return o
 end
 
-text = Text:new{
-    text = "abcdefghijklmnopqrstuvwxyz",
+local main = Element:new {
+    x = 3,
+    y = 2,
+    width = 20,
+    height = 10,
+    backgroundColor = colors.brown
+}
+
+local text1 = Text:new {
+    parent = main,
+    text = "lorem ipsum",
     horizontalAlignment = align.center,
     verticalAlignment = align.center,
     backgroundColor = colors.red,
-    width = 20,
-    height = 10,
-    padding = 2,
+    width = 11,
+    height = 1,
+    padding = 0,
 }
 
-text:draw()
+local text2 = Text:new {
+    parent = main,
+    y = 3,
+    text = "text\ntext",
+    horizontalAlignment = align.center,
+    verticalAlignment = align.center,
+    transparentBackground = true,
+    width = 10,
+    height = 4,
+    padding = 1,
+}
+
+main:draw()
