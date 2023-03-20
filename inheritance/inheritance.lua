@@ -23,10 +23,13 @@ Element = {
     class = "Element",
     parent = nil,
     children = {},
+    globalX = 1,
+    globalY = 1,
     x = 1,
     y = 1,
     width = 1,
     height = 1,
+    visible = true,
     backgroundColor = colors.black,
     transparentBackground = false,
     cells = {},
@@ -44,6 +47,7 @@ function Element:new (o)
 
     if o.parent then
         table.insert(o.parent.children, o)
+        o.globalX, o.globalY = o:getGlobalPos(o.x, o.y)
     end
 
     local cell
@@ -62,7 +66,43 @@ function Element:new (o)
     return o
 end
 
-function Element:selected(x, y)
+function Element:setGlobalPos(x, y)
+    self.globalX = x
+    self.globalY = y
+
+    self.x, self.y = self:getLocalPos(x, y)
+
+    for _, child in ipairs(self.children) do
+        child:setPos(child.x, child.y)
+    end
+end
+
+function Element:setPos(x, y)
+    self.x = x
+    self.y = y
+
+    self.globalX, self.globalY = self:getGlobalPos(x, y)
+
+    for _, child in ipairs(self.children) do
+        child:setPos(child.x, child.y)
+    end
+end
+
+--[[
+    gets the local coordinates of an element in relation to it's parent
+]]
+function Element:getLocalPos(x, y)
+    --global x, y
+    local lx = self.globalX - self.parent.globalX + 1
+    local ly = self.globalY - self.parent.globalY + 1
+
+    return lx, ly
+end
+
+--[[
+    gets the global coordinates of an element
+]]
+function Element:getGlobalPos(x, y)
     --global x, y
     local gx, gy
 
@@ -75,9 +115,23 @@ function Element:selected(x, y)
         element = element.parent
     end
 
-    return x >= gx and x < gx + self.width and y >= gy and y < gy + self.height
+    return gx, gy
 end
 
+--[[
+    converts to global coordinates and then test for if x and y are within bounds
+]]
+function Element:selected(x, y)
+    if not self.visible then
+        return false
+    end
+
+    return x >= self.globalX and x < self.globalX + self.width and y >= self.globalY and y < self.globalY + self.height
+end
+
+--[[
+    set background color for element
+]]
 function Element:setBackgroundColor(color)
     for x = 1, self.width do
         for y = 1, self.height do
@@ -86,43 +140,39 @@ function Element:setBackgroundColor(color)
     end
 end
 
+--[[
+    set whether an element is visible or not
+]]
+function Element:setVisibility(isVisible)
+    self.visible = isVisible
+end
+
+--[[
+    draw children, then draw to parent's canvas if parent exists, otherwise draw to display
+]]
 function Element:draw()
-    for _, child in ipairs(self.children) do
-        child:draw()
+    if not self.visible then
+        return
     end
 
     local px, py
 
-    --code is repeated here so we don't run the parent check (width * height) times, only once
-    if self.parent then
-        --lx and ly are local x, y within an element
-        for lx = 1, self.width do
-            for ly = 1, self.height do
-                --px and py are x, y within parent element
-                px = lx + self.x - 1
-                py = ly + self.y - 1
+    --lx and ly are local x, y within an element
+    for lx = 1, self.width do
+        for ly = 1, self.height do
+            --px and py are x, y within parent element
+            px = lx + self.globalX - 1
+            py = ly + self.globalY - 1
 
-                if not self.transparentBackground then
-                    self.parent.cells[px][py].backgroundColor = self.cells[lx][ly].backgroundColor
-                end
-                self.parent.cells[px][py].textColor = self.cells[lx][ly].textColor
-                self.parent.cells[px][py].character = self.cells[lx][ly].character
-            end
+            term.setCursorPos(px, py)
+            term.setBackgroundColor(self.cells[lx][ly].backgroundColor)
+            term.setTextColor(self.cells[lx][ly].textColor)
+            term.write(self.cells[lx][ly].character)
         end
-    else
-        --lx and ly are local x, y within an element
-        for lx = 1, self.width do
-            for ly = 1, self.height do
-                --px and py are x, y within parent element
-                px = lx + self.x - 1
-                py = ly + self.y - 1
+    end
 
-                term.setCursorPos(px, py)
-                term.setBackgroundColor(self.cells[lx][ly].backgroundColor)
-                term.setTextColor(self.cells[lx][ly].textColor)
-                term.write(self.cells[lx][ly].character)
-            end
-        end
+    for _, child in ipairs(self.children) do
+        child:draw()
     end
 end
 
@@ -156,6 +206,9 @@ function Text:new(o)
     return o
 end
 
+--[[
+    set the text for a Text element
+]]
 function Text:setText(text)
     for x = 1, self.width do
         for y = 1, self.height do
@@ -171,7 +224,7 @@ function Text:setText(text)
     local newLineIndex = text:find("\n", stringBegin, true)
     local substring
     
-    while stringBegin < #text do
+    while stringBegin <= #text do
         if newLineIndex and newLineIndex < stringBegin then
             newLineIndex = text:find("\n", stringBegin, true)
         end
@@ -228,6 +281,9 @@ function Text:setText(text)
     end
 end
 
+--[[
+    set the text color for a Text element
+]]
 function Text:setTextColor(color)
     for x = 1, self.width do
         for y = 1, self.height do
@@ -236,15 +292,17 @@ function Text:setTextColor(color)
     end
 end
 
+--[[
+    depth first search to find selected element given an x and y
+]]
 function getSelectedElement(element, x, y)
     local selectedElement
 
-    for _, child in ipairs(element.children) do
-        if #child.children ~= 0 then
-            selectedElement = getSelectedElement(child, x, y)
-        end
-        if not selectedElement and child:selected(x, y) then
-            return child
+    for i = #element.children, 1, -1 do
+        selectedElement = getSelectedElement(element.children[i], x, y)
+
+        if selectedElement then
+            return selectedElement
         end
     end
 
@@ -262,6 +320,9 @@ local callbacks = {
     ["key_up"] = {},
 }
 
+--[[
+    register callback functions for various mouse and keyboard events
+]]
 function registerCallback(event, element, callback)
     if callbacks[event] then
         callbacks[event][element.name] = callback
@@ -294,13 +355,11 @@ local button1 = Text:new {
     padding = 0,
 }
 
-local function button1Click(button, x, y)
+registerCallback("mouse_click", button1, function(button, x, y)
     if button == 1 then
         button1:setBackgroundColor(2^math.random(15))
     end
-end
-
-registerCallback("mouse_click", button1, button1Click)
+end)
 
 local button2 = Text:new {
     name = "button2",
@@ -316,15 +375,13 @@ local button2 = Text:new {
     padding = 0,
 }
 
-local function button2Click(button, x, y)
+registerCallback("mouse_click", button2, function(button, x, y)
     if button == 1 then
         button2:setBackgroundColor(2^math.random(15))
     elseif button == 2 then
         button2:setTextColor(2^math.random(15))
     end
-end
-
-registerCallback("mouse_click", button2, button2Click)
+end)
 
 local text = Text:new {
     name = "text",
@@ -333,27 +390,49 @@ local text = Text:new {
     text = "lorem ipsum",
     horizontalAlignment = align.center,
     verticalAlignment = align.center,
-    transparentBackground = true,
-    width = 20,
+    backgroundColor = colors.red,
+    width = 10,
     height = 4,
 }
 
+registerCallback("mouse_drag", text, function(button, x, y)
+    if button == 1 then
+        text:setGlobalPos(x, y)
+    end
+end)
+
+local childText = Text:new {
+    name = "childText",
+    parent = text,
+    text = "a",
+    x = 2,
+    y = 1,
+    width = 5,
+    height = 1,
+    backgroundColor = colors.black,
+    textColor = colors.white,
+}
+
+registerCallback("mouse_drag", childText, function(button, x, y)
+    if button == 1 then
+        childText:setGlobalPos(x, y)
+    end
+end)
+
 local selectedElement = main
 
-
 while true do
-    term.setBackgroundColor(colors.black)
-    term.setTextColor(colors.white)
-    term.clear()
-
+    
     text:setText(selectedElement.name)
+    childText:setText(childText.globalX.." "..childText.globalY)
     main:draw()
 
     local event, button, x, y = os.pullEvent()
     if event == "mouse_click" then
         selectedElement = getSelectedElement(main, x, y)
-        if callbacks[event][selectedElement.name] then
-            callbacks[event][selectedElement.name](button, x, y)
-        end
+    end
+
+    if callbacks[event] and callbacks[event][selectedElement.name] then
+        callbacks[event][selectedElement.name](button, x, y)
     end
 end
