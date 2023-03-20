@@ -20,6 +20,7 @@ function Cell:new (o)
 end
 
 Element = {
+    class = "Element",
     parent = nil,
     children = {},
     x = 1,
@@ -59,6 +60,14 @@ function Element:new (o)
     end
 
     return o
+end
+
+function Element:setBackgroundColor(color)
+    for x = 1, self.width do
+        for y = 1, self.height do
+            self.cells[x][y].backgroundColor = color
+        end
+    end
 end
 
 function Element:draw()
@@ -101,7 +110,8 @@ function Element:draw()
     end
 end
 
-Text = Element:new{
+Text = Element:new {
+    class = "Text",
     text = "",
     padding = 0,
     horizontalAlignment = align.left,
@@ -192,16 +202,58 @@ function Text:new(o)
     return o
 end
 
+function Text:setTextColor(color)
+    for x = 1, self.width do
+        for y = 1, self.height do
+            self.cells[x][y].textColor = color
+        end
+    end
+end
+
+Button = Text:new {
+    class = "Button",
+    onClick = {}
+}
+
+function Button:new(o)
+    o = o or {}
+    o = Text:new(o)
+
+    o.onClick = o.onClick or {}
+
+    setmetatable(o, self)
+    self.__index = self
+
+    return o
+end
+
+function Button:clicked(x, y)
+    --global x, y
+    local gx, gy
+
+    local element = self
+    gx = element.x
+    gy = element.y
+    while element.parent do
+        gx = gx + element.parent.x - 1
+        gy = gy + element.parent.y - 1
+        element = element.parent
+    end
+
+    return x >= gx and x < gx + self.width and y >= gy and y < gy + self.height
+end
+
 local main = Element:new {
     x = 3,
     y = 2,
     width = 20,
-    height = 10,
+    height = 15,
     backgroundColor = colors.brown
 }
 
-local text1 = Text:new {
+local button1 = Button:new {
     parent = main,
+    x = 2,
     text = "lorem ipsum",
     horizontalAlignment = align.center,
     verticalAlignment = align.center,
@@ -211,16 +263,72 @@ local text1 = Text:new {
     padding = 0,
 }
 
-local text2 = Text:new {
+local function button1Click()
+    button1:setBackgroundColor(2^math.random(15))
+end
+
+button1.onClick[1] = button1Click
+
+local button2 = Button:new {
     parent = main,
+    x = 5,
     y = 3,
+    text = "kaibochan",
+    horizontalAlignment = align.center,
+    verticalAlignment = align.center,
+    backgroundColor = colors.blue,
+    width = 11,
+    height = 1,
+    padding = 0,
+}
+
+local function button2LeftClick()
+    button2:setBackgroundColor(2^math.random(15))
+end
+
+local function button2RightClick()
+    button2:setTextColor(2^math.random(15))
+end
+
+button2.onClick[1] = button2LeftClick
+button2.onClick[2] = button2RightClick
+
+local text = Text:new {
+    parent = main,
+    x = 5,
+    y = 5,
     text = "text\ntext",
     horizontalAlignment = align.center,
     verticalAlignment = align.center,
     transparentBackground = true,
-    width = 10,
+    width = 6,
     height = 4,
     padding = 1,
 }
 
-main:draw()
+function findButtonClicked(element, x, y)
+    local buttonClicked
+
+    for _, child in ipairs(element.children) do
+        if #child.children ~= 0 then
+            buttonClicked = findButtonClicked(child, x, y)
+        end
+        if not buttonClicked and child.class == "Button" and child:clicked(x, y) then
+            return child
+        end
+    end
+end
+
+while true do
+    term.setBackgroundColor(colors.black)
+    term.setTextColor(colors.white)
+    term.clear()
+
+    main:draw()
+
+    local event, button, x, y = os.pullEvent("mouse_click")
+    local buttonClicked = findButtonClicked(main, x, y)
+    if buttonClicked then
+        buttonClicked.onClick[button]()
+    end
+end
