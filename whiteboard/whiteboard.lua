@@ -113,12 +113,28 @@ local function drawPixels()
 end
 
 --[[
+    draws all buttons according to their location, text, and background color
+]]
+local function drawButtons(display, buttons)
+    local currentColor = display.getBackgroundColor()
+
+    for _, button in pairs(buttons) do
+        display.setCursorPos(button.bounds.topLeft.x, button.bounds.topLeft.y)
+        display.setBackgroundColor(button.currentColor)
+        display.setTextColor(button.textColor)
+        display.write(button.text)
+    end
+
+    display.setBackgroundColor(currentColor)
+end
+
+--[[
     update entire whiteboard according to the pixels data table
     and then draw buttons
 ]]
 local function drawWhiteboard()
     drawPixels()
-    gui.drawButtons(monitor, buttons)
+    drawButtons(monitor, buttons)
 end
 
 --[[
@@ -136,6 +152,20 @@ local function draw(x, y)
 
     monitor.setCursorPos(x, y)
     monitor.write(" ")
+end
+
+--[[
+    highlights the button that is passed in
+]]
+local function highlightButton(button)
+    button.currentColor = button.highlightColor
+end
+
+--[[
+    unhighlight the button that is passed in
+]]
+local function unhighlightButton(button)
+    button.currentColor = button.backgroundColor
 end
 
 --[[
@@ -279,8 +309,8 @@ end
     asks for overwrite confirmation if file exists
 ]]
 local function save()
-    gui.highlightButton(buttons["save"])
-    gui.drawButtons(monitor, buttons)
+    highlightButton(buttons["save"])
+    drawButtons(monitor, buttons)
 
     --create whiteboard filename, ex: "test" => "test.wtbd"
     write("Enter file name to save whiteboard as: ")
@@ -366,16 +396,16 @@ local function save()
     term.clear()
     term.setCursorPos(1, 1)
 
-    gui.unhighlightButton(buttons["save"])
-    gui.drawButtons(monitor, buttons)
+    unhighlightButton(buttons["save"])
+    drawButtons(monitor, buttons)
 end
 
 --[[
     allows user to load whiteboard files from the connected drives
 ]]
 local function load()
-    gui.highlightButton(buttons["load"])
-    gui.drawButtons(monitor, buttons)
+    highlightButton(buttons["load"])
+    drawButtons(monitor, buttons)
 
     local drivePaths = getDrivePaths()
     local allWhiteboards = {}
@@ -439,7 +469,7 @@ local function load()
     term.clear()
     term.setCursorPos(1, 1)
 
-    gui.unhighlightButton(buttons["load"])
+    unhighlightButton(buttons["load"])
     drawWhiteboard()
 end
 
@@ -449,9 +479,9 @@ end
 local function switchToFill()
     drawAction = fillArea
 
-    gui.highlightButton(buttons["fill"])
-    gui.unhighlightButton(buttons["pen"])
-    gui.drawButtons(monitor, buttons)
+    highlightButton(buttons["fill"])
+    unhighlightButton(buttons["pen"])
+    drawButtons(monitor, buttons)
 end
 
 --[[
@@ -460,9 +490,40 @@ end
 local function switchToPen()
     drawAction = draw
 
-    gui.highlightButton(buttons["pen"])
-    gui.unhighlightButton(buttons["fill"])
-    gui.drawButtons(monitor, buttons)
+    highlightButton(buttons["pen"])
+    unhighlightButton(buttons["fill"])
+    drawButtons(monitor, buttons)
+end
+
+--[[
+    generalized button creation function
+    --text: button text
+    --bgColor: normal background color
+    --hlColor: highlighted color
+    --func: function to call on button click
+    --x, y: location to draw button
+]]
+local function createButton(text, bgColor, hlColor, func, x, y)
+    local button = {
+        ["text"] = text,
+        ["function"] = func,
+        ["currentColor"] = bgColor,
+        ["backgroundColor"] = bgColor,
+        ["highlightColor"] = hlColor,
+        ["textColor"] = colors.white,
+        ["bounds"] = {
+            ["topLeft"] = {
+                ["x"] = x,
+                ["y"] = y,
+            },
+            ["bottomRight"] = {
+                ["x"] = x + #text - 1,
+                ["y"] = y,
+            },
+        },
+    }
+
+    return button
 end
 
 --[[
@@ -477,16 +538,16 @@ local function initializeButtons()
             monitor.setBackgroundColor(color.color)
         end
 
-        buttons[color.name] = gui.createButton(" ", color.color, color.color, switchToColor, index, height)
+        buttons[color.name] = createButton(" ", color.color, color.color, switchToColor, index, height)
     end
 
-    buttons["clear"] = gui.createButton("clear", colors.black, colors.black, clear, width - 5, 1)
-    buttons["undo"] = gui.createButton("undo", colors.black, colors.black, undo, width - 10, 1)
-    buttons["redo"] = gui.createButton("redo", colors.black, colors.black, redo, width - 15, 1)
-    buttons["save"] = gui.createButton("save", colors.black, colors.red, save, width - 9, height)
-    buttons["load"] = gui.createButton("load", colors.black, colors.red, load, width - 4, height)
-    buttons["fill"] = gui.createButton("fill", colors.black, colors.red, switchToFill, width - 14, height)
-    buttons["pen"] = gui.createButton("pen", colors.black, colors.red, switchToPen, width - 18, height)
+    buttons["clear"] = createButton("clear", colors.black, colors.black, clear, width - 5, 1)
+    buttons["undo"] = createButton("undo", colors.black, colors.black, undo, width - 10, 1)
+    buttons["redo"] = createButton("redo", colors.black, colors.black, redo, width - 15, 1)
+    buttons["save"] = createButton("save", colors.black, colors.red, save, width - 9, height)
+    buttons["load"] = createButton("load", colors.black, colors.red, load, width - 4, height)
+    buttons["fill"] = createButton("fill", colors.black, colors.red, switchToFill, width - 14, height)
+    buttons["pen"] = createButton("pen", colors.black, colors.red, switchToPen, width - 18, height)
 end
 
 --[[
@@ -583,11 +644,6 @@ local function main()
     if not monitor then
         error("Monitor is necessary to run Whiteboard program")
     end
-
-    if not fs.exists("gui.lua") then
-        error("gui.lua is necessary to run Whiteboard program")
-    end
-    os.loadAPI("gui.lua")
 
     initializePixels()
     initializeButtons()
