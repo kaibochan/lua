@@ -70,13 +70,16 @@ function Element:setGlobalPos(x, y)
     self.globalX = x
     self.globalY = y
 
-    self.x, self.y = self:getLocalPos(x, y)
+    self.x, self.y = self:getParentLocalPos(x, y)
 
     for _, child in ipairs(self.children) do
         child:setPos(child.x, child.y)
     end
 end
 
+--[[
+    sets new position of element relative to parent, children are moved accordingly
+]]
 function Element:setPos(x, y)
     self.x = x
     self.y = y
@@ -89,9 +92,19 @@ function Element:setPos(x, y)
 end
 
 --[[
-    gets the local coordinates of an element in relation to it's parent
+    gets displacement of point x, y relative to global coordinates
 ]]
 function Element:getLocalPos(x, y)
+    local lx = x - self.globalX
+    local ly = y - self.globalY
+
+    return lx, ly
+end
+
+--[[
+    gets the local coordinates of an element in relation to it's parent
+]]
+function Element:getParentLocalPos(x, y)
     --global x, y
     local lx = self.globalX - self.parent.globalX + 1
     local ly = self.globalY - self.parent.globalY + 1
@@ -155,20 +168,25 @@ function Element:draw()
         return
     end
 
-    local px, py
-
     --lx and ly are local x, y within an element
-    for lx = 1, self.width do
-        for ly = 1, self.height do
-            --px and py are x, y within parent element
-            px = lx + self.globalX - 1
-            py = ly + self.globalY - 1
+    for ly = 1, self.height do
+        local characters = ""
+        local textColors = ""
+        local backgroundColors = ""
 
-            term.setCursorPos(px, py)
-            term.setBackgroundColor(self.cells[lx][ly].backgroundColor)
-            term.setTextColor(self.cells[lx][ly].textColor)
-            term.write(self.cells[lx][ly].character)
+        local gy = ly + self.globalY - 1
+        local gx = self.globalX
+
+        for lx = 1, self.width do
+            --px and py are x, y within parent element
+
+            characters = characters .. self.cells[lx][ly].character
+            textColors = textColors .. colors.toBlit(self.cells[lx][ly].textColor)
+            backgroundColors = backgroundColors ..  colors.toBlit(self.cells[lx][ly].backgroundColor)
         end
+
+        term.setCursorPos(gx, gy)
+        term.blit(characters, textColors, backgroundColors)
     end
 
     for _, child in ipairs(self.children) do
@@ -298,6 +316,7 @@ end
 function getSelectedElement(element, x, y)
     local selectedElement
 
+    --iterate over elements backwards to grab elements drawn on top first
     for i = #element.children, 1, -1 do
         selectedElement = getSelectedElement(element.children[i], x, y)
 
@@ -311,7 +330,10 @@ function getSelectedElement(element, x, y)
     end
 end
 
-local callbacks = {
+--[[
+    registered callbacks for each user input event
+]]
+callbacks = {
     ["mouse_click"] = {},
     ["mouse_drag"] = {},
     ["mouse_scroll"] = {},
@@ -328,111 +350,5 @@ function registerCallback(event, element, callback)
         callbacks[event][element.name] = callback
     else
         callbacks[event] = {[element.name] = callback}
-    end
-end
-
-local width, height = term.getSize()
-
-local main = Element:new {
-    name = "main",
-    width = width,
-    height = height,
-    backgroundColor = colors.brown
-}
-
-registerCallback("mouse_click", main, mainClick)
-
-local button1 = Text:new {
-    name = "button1",
-    parent = main,
-    x = 2,
-    text = "lorem ipsum",
-    horizontalAlignment = align.center,
-    verticalAlignment = align.center,
-    backgroundColor = colors.red,
-    width = 11,
-    height = 1,
-    padding = 0,
-}
-
-registerCallback("mouse_click", button1, function(button, x, y)
-    if button == 1 then
-        button1:setBackgroundColor(2^math.random(15))
-    end
-end)
-
-local button2 = Text:new {
-    name = "button2",
-    parent = main,
-    x = 5,
-    y = 3,
-    text = "kaibochan",
-    horizontalAlignment = align.center,
-    verticalAlignment = align.center,
-    backgroundColor = colors.blue,
-    width = 11,
-    height = 1,
-    padding = 0,
-}
-
-registerCallback("mouse_click", button2, function(button, x, y)
-    if button == 1 then
-        button2:setBackgroundColor(2^math.random(15))
-    elseif button == 2 then
-        button2:setTextColor(2^math.random(15))
-    end
-end)
-
-local text = Text:new {
-    name = "text",
-    parent = main,
-    y = 5,
-    text = "lorem ipsum",
-    horizontalAlignment = align.center,
-    verticalAlignment = align.center,
-    backgroundColor = colors.red,
-    width = 10,
-    height = 4,
-}
-
-registerCallback("mouse_drag", text, function(button, x, y)
-    if button == 1 then
-        text:setGlobalPos(x, y)
-    end
-end)
-
-local childText = Text:new {
-    name = "childText",
-    parent = text,
-    text = "a",
-    x = 2,
-    y = 1,
-    width = 5,
-    height = 1,
-    backgroundColor = colors.black,
-    textColor = colors.white,
-}
-
-registerCallback("mouse_drag", childText, function(button, x, y)
-    if button == 1 then
-        childText:setGlobalPos(x, y)
-    end
-end)
-
-local selectedElement = main
-
-while true do
-    
-    text:setText(selectedElement.name)
-    childText:setText(childText.globalX.." "..childText.globalY)
-    main:draw()
-
-    local event, button, x, y = os.pullEvent()
-    if event == "mouse_click" then
-        selectedElement = getSelectedElement(main, x, y)
-    end
-
-    if callbacks[event] and callbacks[event][selectedElement.name] then
-        callbacks[event][selectedElement.name](button, x, y)
     end
 end
