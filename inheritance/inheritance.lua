@@ -62,6 +62,22 @@ function Element:new (o)
     return o
 end
 
+function Element:selected(x, y)
+    --global x, y
+    local gx, gy
+
+    local element = self
+    gx = element.x
+    gy = element.y
+    while element.parent do
+        gx = gx + element.parent.x - 1
+        gy = gy + element.parent.y - 1
+        element = element.parent
+    end
+
+    return x >= gx and x < gx + self.width and y >= gy and y < gy + self.height
+end
+
 function Element:setBackgroundColor(color)
     for x = 1, self.width do
         for y = 1, self.height do
@@ -135,24 +151,36 @@ function Text:new(o)
         end
     end
 
+    o:setText(o.text)
+
+    return o
+end
+
+function Text:setText(text)
+    for x = 1, self.width do
+        for y = 1, self.height do
+            self.cells[x][y].character = " "
+        end
+    end
+
     local textRows = {}
 
     local stringBegin = 1
-    local rowWidth = o.width - o.padding * 2
+    local rowWidth = self.width - self.padding * 2
     local stringEnd = stringBegin + rowWidth - 1
-    local newLineIndex = o.text:find("\n", stringBegin, true)
+    local newLineIndex = text:find("\n", stringBegin, true)
     local substring
     
-    while stringBegin < #o.text do
+    while stringBegin < #text do
         if newLineIndex and newLineIndex < stringBegin then
-            newLineIndex = o.text:find("\n", stringBegin, true)
+            newLineIndex = text:find("\n", stringBegin, true)
         end
         
         if newLineIndex and newLineIndex < stringEnd then
-            substring = o.text:sub(stringBegin, newLineIndex - 1)
+            substring = text:sub(stringBegin, newLineIndex - 1)
             stringBegin = newLineIndex + 1
         else
-            substring = o.text:sub(stringBegin, stringEnd)
+            substring = text:sub(stringBegin, stringEnd)
             stringBegin = stringEnd + 1
         end
         
@@ -162,35 +190,35 @@ function Text:new(o)
     end
     
     local verticalOffset
-    if o.verticalAlignment == align.top then
-        verticalOffset = o.padding
-    elseif o.verticalAlignment == align.center then
-        verticalOffset = o.height / 2 - #textRows / 2
-    elseif o.verticalAlignment == align.bottom then
-        verticalOffset = o.height - o.padding - #textRows
+    if self.verticalAlignment == align.top then
+        verticalOffset = self.padding
+    elseif self.verticalAlignment == align.center then
+        verticalOffset = self.height / 2 - #textRows / 2
+    elseif self.verticalAlignment == align.bottom then
+        verticalOffset = self.height - self.padding - #textRows
     end
     
     local horizontalOffsets = {}
-    for index, text in ipairs(textRows) do
-        if o.horizontalAlignment == align.left then
-            table.insert(horizontalOffsets, o.padding)
-        elseif o.horizontalAlignment == align.center then
-            table.insert(horizontalOffsets, o.width / 2 - #textRows[index] / 2)
-        elseif o.horizontalAlignment == align.right then
-            table.insert(horizontalOffsets, o.width - o.padding - #textRows[index])
+    for index, _ in ipairs(textRows) do
+        if self.horizontalAlignment == align.left then
+            table.insert(horizontalOffsets, self.padding)
+        elseif self.horizontalAlignment == align.center then
+            table.insert(horizontalOffsets, self.width / 2 - #textRows[index] / 2)
+        elseif self.horizontalAlignment == align.right then
+            table.insert(horizontalOffsets, self.width - self.padding - #textRows[index])
         end
     end
 
     local substringIndex = 1
     local rowIndex = 1
 
-    for y = 1, o.height do
+    for y = 1, self.height do
         if y > verticalOffset and y <= verticalOffset + #textRows then
             substringIndex = 1
 
-            for x = 1, o.width do
+            for x = 1, self.width do
                 if x > horizontalOffsets[rowIndex] and x <= horizontalOffsets[rowIndex] + #textRows[rowIndex] then
-                    o.cells[x][y].character = textRows[rowIndex]:sub(substringIndex, substringIndex)
+                    self.cells[x][y].character = textRows[rowIndex]:sub(substringIndex, substringIndex)
                     substringIndex = substringIndex + 1
                 end
             end
@@ -198,8 +226,6 @@ function Text:new(o)
             rowIndex = rowIndex + 1
         end
     end
-
-    return o
 end
 
 function Text:setTextColor(color)
@@ -210,48 +236,53 @@ function Text:setTextColor(color)
     end
 end
 
-Button = Text:new {
-    class = "Button",
-    onClick = {}
-}
+function getSelectedElement(element, x, y)
+    local selectedElement
 
-function Button:new(o)
-    o = o or {}
-    o = Text:new(o)
-
-    o.onClick = o.onClick or {}
-
-    setmetatable(o, self)
-    self.__index = self
-
-    return o
-end
-
-function Button:clicked(x, y)
-    --global x, y
-    local gx, gy
-
-    local element = self
-    gx = element.x
-    gy = element.y
-    while element.parent do
-        gx = gx + element.parent.x - 1
-        gy = gy + element.parent.y - 1
-        element = element.parent
+    for _, child in ipairs(element.children) do
+        if #child.children ~= 0 then
+            selectedElement = getSelectedElement(child, x, y)
+        end
+        if not selectedElement and child:selected(x, y) then
+            return child
+        end
     end
 
-    return x >= gx and x < gx + self.width and y >= gy and y < gy + self.height
+    if element:selected(x, y) then
+        return element
+    end
 end
 
+local callbacks = {
+    ["mouse_click"] = {},
+    ["mouse_drag"] = {},
+    ["mouse_scroll"] = {},
+    ["mouse_up"] = {},
+    ["key"] = {},
+    ["key_up"] = {},
+}
+
+function registerCallback(event, element, callback)
+    if callbacks[event] then
+        callbacks[event][element.name] = callback
+    else
+        callbacks[event] = {[element.name] = callback}
+    end
+end
+
+local width, height = term.getSize()
+
 local main = Element:new {
-    x = 3,
-    y = 2,
-    width = 20,
-    height = 15,
+    name = "main",
+    width = width,
+    height = height,
     backgroundColor = colors.brown
 }
 
-local button1 = Button:new {
+registerCallback("mouse_click", main, mainClick)
+
+local button1 = Text:new {
+    name = "button1",
     parent = main,
     x = 2,
     text = "lorem ipsum",
@@ -263,13 +294,16 @@ local button1 = Button:new {
     padding = 0,
 }
 
-local function button1Click()
-    button1:setBackgroundColor(2^math.random(15))
+local function button1Click(button, x, y)
+    if button == 1 then
+        button1:setBackgroundColor(2^math.random(15))
+    end
 end
 
-button1.onClick[1] = button1Click
+registerCallback("mouse_click", button1, button1Click)
 
-local button2 = Button:new {
+local button2 = Text:new {
+    name = "button2",
     parent = main,
     x = 5,
     y = 3,
@@ -282,53 +316,44 @@ local button2 = Button:new {
     padding = 0,
 }
 
-local function button2LeftClick()
-    button2:setBackgroundColor(2^math.random(15))
+local function button2Click(button, x, y)
+    if button == 1 then
+        button2:setBackgroundColor(2^math.random(15))
+    elseif button == 2 then
+        button2:setTextColor(2^math.random(15))
+    end
 end
 
-local function button2RightClick()
-    button2:setTextColor(2^math.random(15))
-end
-
-button2.onClick[1] = button2LeftClick
-button2.onClick[2] = button2RightClick
+registerCallback("mouse_click", button2, button2Click)
 
 local text = Text:new {
+    name = "text",
     parent = main,
-    x = 5,
     y = 5,
-    text = "text\ntext",
+    text = "lorem ipsum",
     horizontalAlignment = align.center,
     verticalAlignment = align.center,
     transparentBackground = true,
-    width = 6,
+    width = 20,
     height = 4,
-    padding = 1,
 }
 
-function findButtonClicked(element, x, y)
-    local buttonClicked
+local selectedElement = main
 
-    for _, child in ipairs(element.children) do
-        if #child.children ~= 0 then
-            buttonClicked = findButtonClicked(child, x, y)
-        end
-        if not buttonClicked and child.class == "Button" and child:clicked(x, y) then
-            return child
-        end
-    end
-end
 
 while true do
     term.setBackgroundColor(colors.black)
     term.setTextColor(colors.white)
     term.clear()
 
+    text:setText(selectedElement.name)
     main:draw()
 
-    local event, button, x, y = os.pullEvent("mouse_click")
-    local buttonClicked = findButtonClicked(main, x, y)
-    if buttonClicked then
-        buttonClicked.onClick[button]()
+    local event, button, x, y = os.pullEvent()
+    if event == "mouse_click" then
+        selectedElement = getSelectedElement(main, x, y)
+        if callbacks[event][selectedElement.name] then
+            callbacks[event][selectedElement.name](button, x, y)
+        end
     end
 end
