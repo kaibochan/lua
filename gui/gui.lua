@@ -197,6 +197,7 @@ end
 Text = Element:new {
     class = "Text",
     text = "",
+    textRows = {},
     padding = 0,
     horizontalAlignment = align.left,
     verticalAlignment = align.top,
@@ -206,6 +207,9 @@ Text = Element:new {
 function Text:new(o)
     o = o or {}
     o = Element:new(o)
+
+    --tables are passed by reference so new ones must be created if not passed in
+    o.textRows = o.textRows or {}
 
     setmetatable(o, self)
     self.__index = self
@@ -225,58 +229,79 @@ function Text:new(o)
 end
 
 --[[
+    set the horizontal alignment and update cells accordingly
+]]
+function Text:setHorizontalAlignment(alignment)
+    self.horizontalAlignment = alignment
+    self:setText(self.text)
+end
+
+--[[
+    set the vertical alignment and update cells accordingly
+]]
+function Text:setVerticalAlignment(alignment)
+    self.verticalAlignment = alignment
+    self:setText(self.text)
+end
+
+--[[
     set the text for a Text element
 ]]
 function Text:setText(text)
+    self.text = text
+
     for x = 1, self.width do
         for y = 1, self.height do
             self.cells[x][y].character = " "
         end
     end
 
-    local textRows = {}
+    self.textRows = {}
 
     local stringBegin = 1
     local rowWidth = self.width - self.padding * 2
     local stringEnd = stringBegin + rowWidth - 1
-    local newLineIndex = text:find("\n", stringBegin, true)
+    local newLineIndex = self.text:find("\n", stringBegin, true)
+    local endsWithNewLine
     local substring
     
-    while stringBegin <= #text do
+    while #self.textRows < self.height - 2 * self.padding and stringBegin <= #self.text do
         if newLineIndex and newLineIndex < stringBegin then
-            newLineIndex = text:find("\n", stringBegin, true)
+            newLineIndex = self.text:find("\n", stringBegin, true)
         end
         
+        endsWithNewLine = false
         if newLineIndex and newLineIndex < stringEnd then
-            substring = text:sub(stringBegin, newLineIndex - 1)
+            endsWithNewLine = true
+            substring = self.text:sub(stringBegin, newLineIndex - 1)
             stringBegin = newLineIndex + 1
         else
-            substring = text:sub(stringBegin, stringEnd)
+            substring = self.text:sub(stringBegin, stringEnd)
             stringBegin = stringEnd + 1
         end
         
         stringEnd = stringBegin + rowWidth - 1
         
-        table.insert(textRows, substring)
+        table.insert(self.textRows, {text = substring, hasNewLine = endsWithNewLine})
     end
     
     local verticalOffset
     if self.verticalAlignment == align.top then
         verticalOffset = self.padding
     elseif self.verticalAlignment == align.center then
-        verticalOffset = self.height / 2 - #textRows / 2
+        verticalOffset = self.height / 2 - #self.textRows / 2
     elseif self.verticalAlignment == align.bottom then
-        verticalOffset = self.height - self.padding - #textRows
+        verticalOffset = self.height - self.padding - #self.textRows
     end
     
     local horizontalOffsets = {}
-    for index, _ in ipairs(textRows) do
+    for index, textData in ipairs(self.textRows) do
         if self.horizontalAlignment == align.left then
             table.insert(horizontalOffsets, self.padding)
         elseif self.horizontalAlignment == align.center then
-            table.insert(horizontalOffsets, self.width / 2 - #textRows[index] / 2)
+            table.insert(horizontalOffsets, self.width / 2 - #textData.text / 2)
         elseif self.horizontalAlignment == align.right then
-            table.insert(horizontalOffsets, self.width - self.padding - #textRows[index])
+            table.insert(horizontalOffsets, self.width - self.padding - #textData.text)
         end
     end
 
@@ -284,12 +309,12 @@ function Text:setText(text)
     local rowIndex = 1
 
     for y = 1, self.height do
-        if y > verticalOffset and y <= verticalOffset + #textRows then
+        if y > verticalOffset and y <= verticalOffset + #self.textRows then
             substringIndex = 1
 
             for x = 1, self.width do
-                if x > horizontalOffsets[rowIndex] and x <= horizontalOffsets[rowIndex] + #textRows[rowIndex] then
-                    self.cells[x][y].character = textRows[rowIndex]:sub(substringIndex, substringIndex)
+                if x > horizontalOffsets[rowIndex] and x <= horizontalOffsets[rowIndex] + #self.textRows[rowIndex].text then
+                    self.cells[x][y].character = self.textRows[rowIndex].text:sub(substringIndex, substringIndex)
                     substringIndex = substringIndex + 1
                 end
             end
@@ -307,6 +332,191 @@ function Text:setTextColor(color)
         for y = 1, self.height do
             self.cells[x][y].textColor = color
         end
+    end
+end
+
+Textbox = Text:new{
+    cursorPos = 0,
+    cursorBackgroundColor = colors.white,
+    cursorTextColor = colors.black,
+    cursorRowOffset = 0,
+    cursorRowIndex = 1,
+}
+
+function Textbox:new(o)
+    o = o or {}
+    o = Text:new(o)
+
+    setmetatable(o, self)
+    self.__index = self
+
+    o:setHorizontalAlignment(o.horizontalAlignment)
+    o:setVerticalAlignment(o.verticalAlignment)
+
+    registerCallback("char", o, Textbox.characterTyped)
+    registerCallback("key", o, Textbox.keyPressed)
+end
+
+function Textbox:getCursorPosX()
+    return 1
+end
+
+function Textbox:getCursorPosY()
+    return 1
+end
+
+--[[
+    different methods for computing the X, Y position of cursor dependent on the alignment
+]]
+Textbox.cursorPosComputeXY = {
+    getCursorPosXLeftAligned = function(txb)
+        return txb.padding + txb.cursorRowOffset + 1
+    end,
+    getCursorPosXRightAligned = function(txb)
+        return txb.width - txb.padding - #txb.textRows[txb.cursorRowIndex].text + txb.cursorRowOffset
+    end,
+    getCursorPosXCenterAligned = function(txb)
+        return (txb.width - #txb.textRows[txb.cursorRowIndex].text) / 2 + txb.cursorRowOffset
+    end,
+    getCursorPosYTopAligned = function(txb)
+        return txb.padding + txb.cursorRowIndex
+    end,
+    getCursorPosYBottomAligned = function(txb)
+        return txb.height - txb.padding - #txb.textRows + txb.cursorRowIndex
+    end,
+    getCursorPosYCenterAligned = function(txb)
+        return (txb.height - #txb.textRows) / 2 + txb.cursorRowIndex
+    end
+}
+
+--[[
+    set the horizontal alignment, update cells, and change computation of X position for a given cursorPos
+]]
+function Textbox:setHorizontalAlignment(alignment)
+    Text.setHorizontalAlignment(self, alignment)
+
+    if self.horizontalAlignment == align.left then
+        self.getCursorPosX = Textbox.cursorPosComputeXY.getCursorPosXLeftAligned
+    elseif self.horizontalAlignment == align.right then
+        self.getCursorPosX = Textbox.cursorPosComputeXY.getCursorPosXRightAligned
+    elseif self.horizontalAlignment == align.center then
+        self.getCursorPosX = Textbox.cursorPosComputeXY.getCursorPosXCenterAligned
+    end
+end
+
+--[[
+    set the vertical alignment, update cells, and change computation of Y position for a given cursorPos
+]]
+function Textbox:setVerticalAlignment(alignment)
+    Text.setVerticalAlignment(self, alignment)
+
+    if self.verticalAlignment == align.left then
+        self.getCursorPosY = Textbox.cursorPosComputeXY.getCursorPosYTopAligned
+    elseif self.verticalAlignment == align.right then
+        self.getCursorPosY = Textbox.cursorPosComputeXY.getCursorPosYBottomAligned
+    elseif self.verticalAlignment == align.center then
+        self.getCursorPosY = Textbox.cursorPosComputeXY.getCursorPosYCenterAligned
+    end
+end
+
+function Textbox:setCursorPos(newCursorPos)
+    self.cursorPos = newCursorPos
+
+    --update cells
+    local cursorX = self:getCursorPosX()
+    local cursorY = self:getCursorPosY()
+
+    for x = 1, self.width do
+        for y = 1, self.height do
+            self.cells[x][y].backgroundColor = self.backgroundColor
+            self.cells[x][y].textColor = self.textColor
+        end
+    end
+
+    self.cells[cursorX][cursorY].backgroundColor = self.cursorBackgroundColor
+    self.cells[cursorX][cursorY].textColor = self.cursorTextColor
+end
+
+function Textbox:insertCharacter(character)
+    self:setText(self.text:sub(0, self.cursorPos)..character..self.text:sub(self.cursorPos + 1))
+    self:setCursorPos(self.cursorPos + 1)
+end
+
+function Textbox.characterTyped(txb, event, character)
+    txb:insertCharacter(character)
+end
+
+function Textbox.keyPressed(txb, event, key, isHeld)
+    local keyName = keys.getName(key)
+
+    if keyName == "left" and txb.cursorPos > 0 then
+        txb:setCursorPos(txb.cursorPos - 1)
+    elseif keyName == "right" and txb.cursorPos <= #txb.text then
+        txb:setCursorPos(txb.cursorPos + 1)
+    elseif keyName == "up" or keyName == "down" then
+
+        local maxTextWidth = txb.width - txb.padding * 2
+
+        local stringIndex = 0
+        local rowIndex
+
+        for index, textData in ipairs(txb.textRows) do
+            if stringIndex < txb.cursorPos then
+                if stringIndex + #textData.text >= txb.cursorPos then
+                    rowIndex = index
+                else
+                    stringIndex = stringIndex + #textData.text
+                    if textData.hasNewLine then
+                        stringIndex = stringIndex + 1
+                    end
+                end
+            end
+        end
+        
+        txb.cursorRowIndex = rowIndex
+        txb.cursorRowOffset = txb.cursorPos - stringIndex
+
+        local previousRow = txb.textRows[rowIndex - 1]
+        local currentRow = txb.textRows[rowIndex]
+        local nextRow = txb.textRows[rowIndex + 1]
+        local cursorOffset = txb.cursorPos - stringIndex
+
+        if keyName == "up" then
+            if not previousRow then
+                txb:setCursorPos(0)
+            else
+                --take a second look at this
+                if txb.horizontalAlignment == align.left then
+                    if cursorOffset > #previousRow.text then
+                        txb:setCursorPos(stringIndex - 1)
+                    else
+                        if previousRow.hasNewLine then
+                            cursorOffset = cursorOffset - 1
+                        end
+                        txb:setCursorPos(stringIndex - #previousRow.text + cursorOffset)
+                    end
+                elseif txb.horizontalAlignment == align.center then
+                    if cursorOffset < (maxTextWidth - #previousRow.text) / 2 then
+                        txb:setCursorPos(stringIndex - #previousRow.text - 1)
+                    elseif cursorOffset > (maxTextWidth + #previousRow.text) / 2 then
+                        txb:setCursorPos(stringIndex - 1)
+                    else
+                        if previousRow.hasNewLine then
+                            cursorOffset = cursorOffset - 1
+                        end
+                        txb:setCursorPos(stringIndex - #previousRow.text + (#previousRow.text - #currentRow.text) / 2 + cursorOffset)
+                    end
+                elseif txb.horizontalAlignment == align.right then
+                    if cursorOffset < maxTextWidth - #previousRow.text then
+                        txb:setCursorPos(stringIndex - #previousRow.text + #currentRow - cursorOffset)
+                    else
+                        txb:setCursorPos(stringIndex - #previousRow.text - 1)
+                    end
+                end
+            end
+        end
+    elseif keyName == "enter" then
+        txb:insertCharacter("\n")
     end
 end
 
@@ -340,6 +550,8 @@ callbacks = {
     ["mouse_up"] = {},
     ["key"] = {},
     ["key_up"] = {},
+    ["char"] = {},
+    ["paste"] = {},
 }
 
 --[[

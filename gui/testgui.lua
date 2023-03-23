@@ -23,7 +23,7 @@ local button1 = Text:new {
     padding = 0,
 }
 
-registerCallback("mouse_click", button1, function(button, x, y)
+registerCallback("mouse_click", button1, function(event, button, x, y)
     if button == 1 then
         button1:setBackgroundColor(2^math.random(15))
     end
@@ -32,7 +32,7 @@ end)
 local button2 = Text:new {
     name = "button2",
     parent = main,
-    x = 5,
+    x = 2,
     y = 3,
     text = "kaibochan",
     horizontalAlignment = align.center,
@@ -43,7 +43,7 @@ local button2 = Text:new {
     padding = 0,
 }
 
-registerCallback("mouse_click", button2, function(button, x, y)
+registerCallback("mouse_click", button2, function(element, event, button, x, y)
     if button == 1 then
         button2:setBackgroundColor(2^math.random(15))
     elseif button == 2 then
@@ -63,7 +63,7 @@ local text = Text:new {
     height = 4,
 }
 
-registerCallback("mouse_drag", text, function(button, x, y)
+registerCallback("mouse_drag", text, function(element, event, button, x, y)
     if button == 1 then
         text:setGlobalPos(x, y)
     end
@@ -81,11 +81,22 @@ local childText = Text:new {
     textColor = colors.black,
 }
 
-registerCallback("mouse_drag", childText, function(button, x, y)
+registerCallback("mouse_drag", childText, function(element, event, button, x, y)
     if button == 1 then
         childText:setGlobalPos(x, y)
     end
 end)
+
+local textBox = Textbox:new {
+    name = "textBox1",
+    parent = main,
+    x = 25,
+    y = 2,
+    width = 20,
+    height = 5,
+    backgroundColor = colors.red,
+    textColor = colors.orange,
+}
 
 local selectedElement = main
 
@@ -95,12 +106,12 @@ while true do
     childText:setText(childText.globalX.." "..childText.globalY)
     main:draw()
 
-    local event, button, x, y = os.pullEvent()
+    local event, data1, data2, data3 = os.pullEvent()
     if event == "mouse_click" then
-        selectedElement = getSelectedElement(main, x, y)
+        selectedElement = getSelectedElement(main, data2, data3)
     end
 
     if callbacks[event] and callbacks[event][selectedElement.name] then
-        callbacks[event][selectedElement.name](button, x, y)
+        callbacks[event][selectedElement.name](selectedElement, event, data1, data2, data3)
     end
 end
