@@ -23,7 +23,7 @@ local button1 = Text:new {
     padding = 0,
 }
 
-registerCallback("mouse_click", button1, function(event, button, x, y)
+registerCallback("mouse_click", button1, function(element, event, button, x, y)
     if button == 1 then
         button1:setBackgroundColor(2^math.random(15))
     end
@@ -101,7 +101,6 @@ local textBox = Textbox:new {
 local selectedElement = main
 
 while true do
-
     text:setText(selectedElement.name)
     childText:setText(childText.globalX.." "..childText.globalY)
     main:draw()
