@@ -181,7 +181,6 @@ function Canvas:draw()
         end
 
         self.display.device.setCursorPos(1, y)
-
         self.display.device.blit(characters, textColors, backgroundColors)
     end
 end
@@ -375,6 +374,36 @@ end
 --Text
 --------------------------------
 
+RowString = {
+    text = "",
+    hasNewLine = false,
+    __index = function(tab, k)
+        if k > 0 and k <= #tab.text then
+            return tab.text:sub(k, k)
+        end
+        return " "
+    end,
+}
+setmetatable(RowString, RowString)
+
+function RowString:new(o)
+    o = o or {}
+	setmetatable(o, self)
+	return o
+end
+
+TextRows = {
+    __index = function(tab, k)
+        return RowString
+    end
+}
+
+function TextRows:new(o)
+    o = o or {}
+	setmetatable(o, self)
+	return o
+end
+
 Text = Element:new {
     class = "Text",
     textColor = colors.white,
@@ -398,7 +427,7 @@ function Text:new(o)
     o = Element:new(o)
 
     --tables are passed by reference so new ones must be created
-    o.textRows = {}
+    o.textRows = TextRows:new()
     o.horizontalOffsets = {}
 
     setmetatable(o, self)
@@ -413,6 +442,8 @@ function Text:new(o)
         end
     end
 
+    o:setStartRowIndexFunction()
+    o:setStartSubstringIndexFunction()
     o:setText(o.text)
 
     if o.name then
@@ -434,7 +465,7 @@ function Text.textScroll(txt, event, scrollDir, x, y)
     if txt.shiftHeld then
         txt.horizontalScrollOffset = txt.horizontalScrollOffset + scrollDir
 
-        local maxHorizontalScroll = txt.longestRowLength - txt.width + 2 * txt.padding
+        local maxHorizontalScroll = math.max(txt.longestRowLength - txt.width + 2 * txt.padding, 0)
 
         if txt.horizontalScrollOffset < 0 then
             txt.horizontalScrollOffset = 0
@@ -446,16 +477,12 @@ function Text.textScroll(txt, event, scrollDir, x, y)
     else
         txt.verticalScrollOffset = txt.verticalScrollOffset + scrollDir
 
-        local maxVerticalScroll = #txt.textRows - txt.height + 2 * txt.padding
+        local maxVerticalScroll = math.max(#txt.textRows - txt.height + 2 * txt.padding, 0)
 
         if txt.verticalScrollOffset < 0 then
             txt.verticalScrollOffset = 0
         elseif txt.verticalScrollOffset > maxVerticalScroll then
-            if maxVerticalScroll > 0 then
-                txt.verticalScrollOffset = maxVerticalScroll
-            else
-                txt.verticalScrollOffset = 0
-            end
+            txt.verticalScrollOffset = maxVerticalScroll
         else
             txt:updateCells()
         end
@@ -469,11 +496,60 @@ function Text.releaseShift(txt, event, key)
 end
 
 --[[
+    black magic is used to compute the substringIndex and rowIndex offsets dependent on the alignment and current scroll offset
+]]
+Text.computeIndex = {
+    getStartSubstringIndexLeftAligned = function(txt, rowIndex)
+        return 1 - txt.padding + txt.horizontalScrollOffset
+    end,
+    getStartSubstringIndexRightAligned = function(txt, rowIndex)
+        return 1 + txt.padding + #txt.textRows[rowIndex].text - txt.width + txt.horizontalScrollOffset
+        + math.min(0, -txt.longestRowLength + txt.width - 2 * txt.padding)
+    end,
+    getStartSubstringIndexCenterAligned = function(txt, rowIndex)
+        return 1 - txt.padding + math.ceil((#txt.textRows[rowIndex].text - txt.width + 2 * txt.padding) / 2) + txt.horizontalScrollOffset
+        + math.min(0, math.floor((-txt.longestRowLength + txt.width - 2 * txt.padding) / 2))
+    end,
+    getStartRowIndexTopAligned = function(txt)
+        return 1 - txt.padding + txt.verticalScrollOffset
+    end,
+    getStartRowIndexBottomAligned = function(txt)
+        return 1 + txt.padding + #txt.textRows - txt.height + txt.verticalScrollOffset
+        + math.min(0, -#txt.textRows + txt.height - 2 * txt.padding)
+    end,
+    getStartRowIndexCenterAligned = function(txt)
+        return 1 - txt.padding + math.ceil((#txt.textRows - txt.height + 2 * txt.padding) / 2) + txt.verticalScrollOffset
+        + math.min(0, math.floor((-#txt.textRows + txt.height - 2 * txt.padding) / 2))
+    end,
+}
+
+function Text:setStartSubstringIndexFunction()
+    if self.horizontalAlignment == align.left then
+        self.getStartSubstringIndex = Text.computeIndex.getStartSubstringIndexLeftAligned
+    elseif self.horizontalAlignment == align.right then
+        self.getStartSubstringIndex = Text.computeIndex.getStartSubstringIndexRightAligned
+    elseif self.horizontalAlignment == align.center then
+        self.getStartSubstringIndex = Text.computeIndex.getStartSubstringIndexCenterAligned
+    end
+end
+
+function Text:setStartRowIndexFunction()
+    if self.verticalAlignment == align.top then
+        self.getStartRowIndex = Text.computeIndex.getStartRowIndexTopAligned
+    elseif self.verticalAlignment == align.bottom then
+        self.getStartRowIndex = Text.computeIndex.getStartRowIndexBottomAligned
+    elseif self.verticalAlignment == align.center then
+        self.getStartRowIndex = Text.computeIndex.getStartRowIndexCenterAligned
+    end
+end
+
+--[[
     set the horizontal alignment and update cells accordingly
 ]]
 function Text:setHorizontalAlignment(alignment)
     self.horizontalAlignment = alignment
-    self:setText(self.text)
+    self:setStartSubstringIndexFunction()
+    self:updateCells()
 end
 
 --[[
@@ -481,14 +557,15 @@ end
 ]]
 function Text:setVerticalAlignment(alignment)
     self.verticalAlignment = alignment
-    self:setText(self.text)
+    self:setStartRowIndexFunction()
+    self:updateCells()
 end
 
 --[[
     update rows of text according to current text string and whether to wrap text or not
 ]]
 function Text:updateTextRows()
-    self.textRows = {}
+    self.textRows = TextRows:new()
 
     local stringBegin = 1
     local rowWidth = self.width - self.padding * 2
@@ -505,22 +582,20 @@ function Text:updateTextRows()
             newLineIndex = self.text:find("\n", stringBegin, true)
         end
         
-        endsWithNewLine = false
         if newLineIndex and (newLineIndex < stringEnd or not self.wrapText) then
-            endsWithNewLine = true
-            substring = self.text:sub(stringBegin, newLineIndex - 1)
+            substring = RowString:new { text = self.text:sub(stringBegin, newLineIndex - 1), hasNewLine = true }
             stringBegin = newLineIndex + 1
         elseif not self.wrapText then
-            substring = self.text:sub(stringBegin)
-            stringBegin = stringBegin + #substring
+            substring = RowString:new { text = self.text:sub(stringBegin) }
+            stringBegin = stringBegin + #substring.text
         else
-            substring = self.text:sub(stringBegin, stringEnd)
+            substring = RowString:new { text = self.text:sub(stringBegin, stringEnd) }
             stringBegin = stringEnd + 1
         end
         
         stringEnd = stringBegin + rowWidth - 1
         
-        table.insert(self.textRows, {text = substring, hasNewLine = endsWithNewLine})
+        table.insert(self.textRows, substring)
 
         if #self.textRows[index].text > self.longestRowLength then
             self.longestRowLength = #self.textRows[index].text
@@ -533,56 +608,83 @@ end
 --[[
     update vertical and horizontal offsets according to alignment and text
 ]]
-function Text:updateOffsets()
-    if self.verticalAlignment == align.top then
-        self.verticalOffset = self.padding
-    elseif self.verticalAlignment == align.center then
-        self.verticalOffset = (self.height - #self.textRows) / 2
-    elseif self.verticalAlignment == align.bottom then
-        self.verticalOffset = self.height - self.padding - #self.textRows
-    end
+-- function Text:updateOffsets()
+--     if self.verticalAlignment == align.top then
+--         self.verticalOffset = self.padding
+--     elseif self.verticalAlignment == align.center then
+--         self.verticalOffset = (self.height - #self.textRows) / 2
+--     elseif self.verticalAlignment == align.bottom then
+--         self.verticalOffset = self.height - self.padding - #self.textRows
+--     end
 
-    self.horizontalOffsets = {}
-    for index, textData in ipairs(self.textRows) do
-        if self.horizontalAlignment == align.left then
-            table.insert(self.horizontalOffsets, self.padding)
-        elseif self.horizontalAlignment == align.center then
-            table.insert(self.horizontalOffsets, self.width / 2 - #textData.text / 2)
-        elseif self.horizontalAlignment == align.right then
-            table.insert(self.horizontalOffsets, self.width - self.padding - #textData.text)
-        end
-    end
-end
+--     self.horizontalOffsets = {}
+--     for index, textData in ipairs(self.textRows) do
+--         if self.horizontalAlignment == align.left then
+--             table.insert(self.horizontalOffsets, self.padding)
+--         elseif self.horizontalAlignment == align.center then
+--             table.insert(self.horizontalOffsets, self.width / 2 - #textData.text / 2)
+--         elseif self.horizontalAlignment == align.right then
+--             table.insert(self.horizontalOffsets, self.width - self.padding - #textData.text)
+--         end
+--     end
+-- end
 
 --[[
     update cells according to current scroll position, alignment, and text
 ]]
-function Text:updateCells()
-    local substringIndex = 1
-    local rowIndex = 1 + self.verticalScrollOffset
+-- function Text:updateCells()
+--     local substringIndex = 1
+--     local rowIndex = 1 + self.verticalScrollOffset
 
-    for x = 1, self.width do
-        for y = 1, self.height do
-            self.cells[x][y].character = " "
-        end
-    end
+--     for x = 1, self.width do
+--         for y = 1, self.height do
+--             self.cells[x][y].character = " "
+--         end
+--     end
+
+--     for y = 1, self.height do
+--         if y + self.verticalScrollOffset > self.verticalOffset and y + self.verticalScrollOffset <= self.verticalOffset + #self.textRows
+--         and rowIndex <= #self.textRows and y <= self.height - self.padding then
+--             substringIndex = 1 + self.horizontalScrollOffset
+
+--             for x = 1, self.width do
+--                 if substringIndex <= #self.textRows[rowIndex].text and x + self.horizontalScrollOffset > self.horizontalOffsets[rowIndex]
+--                 and x + self.horizontalScrollOffset <= self.horizontalOffsets[rowIndex] + #self.textRows[rowIndex].text and x <= self.width - self.padding then
+
+--                     self.cells[x][y].character = self.textRows[rowIndex].text:sub(substringIndex, substringIndex)
+--                     substringIndex = substringIndex + 1
+--                 end
+--             end
+
+--             rowIndex = rowIndex + 1
+--         end
+--     end
+-- end
+
+--[[
+    write characters to cells data table according to scroll offsets and alignments
+]]
+function Text:updateCells()
+    local rowIndex = self:getStartRowIndex()
+    local substringIndex
 
     for y = 1, self.height do
-        if y + self.verticalScrollOffset > self.verticalOffset and y + self.verticalScrollOffset <= self.verticalOffset + #self.textRows
-        and rowIndex <= #self.textRows and y <= self.height - self.padding then
-            substringIndex = 1 + self.horizontalScrollOffset
+        substringIndex = self:getStartSubstringIndex(rowIndex)
 
+        if y > self.padding and y < self.height - self.padding + 1 then
             for x = 1, self.width do
-                if substringIndex <= #self.textRows[rowIndex].text and x + self.horizontalScrollOffset > self.horizontalOffsets[rowIndex]
-                and x + self.horizontalScrollOffset <= self.horizontalOffsets[rowIndex] + #self.textRows[rowIndex].text and x <= self.width - self.padding then
-
-                    self.cells[x][y].character = self.textRows[rowIndex].text:sub(substringIndex, substringIndex)
-                    substringIndex = substringIndex + 1
+                if x > self.padding and x < self.width - self.padding + 1 then
+                    if self.textRows[rowIndex][substringIndex] == "" then
+                        error(""..rowIndex..", "..substringIndex..", "..#self.textRows..", "..#self.textRows[rowIndex].text)
+                    end
+                    self.cells[x][y].character = self.textRows[rowIndex][substringIndex]
                 end
-            end
 
-            rowIndex = rowIndex + 1
+                substringIndex = substringIndex + 1
+            end
         end
+
+        rowIndex = rowIndex + 1
     end
 end
 
@@ -593,7 +695,7 @@ function Text:setText(text)
     self.text = text
 
     self:updateTextRows()
-    self:updateOffsets()
+    --self:updateOffsets()
     self:updateCells()
 end
 

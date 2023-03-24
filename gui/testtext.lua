@@ -18,17 +18,20 @@ local paragraph =
 .." justo nunc, ullamcorper eget urna ut, fringilla ornare sem.\nFusce bibendum mi nec diam tem"
 .."por, a sodales elit ultrices."
 
+
 local canvas = setDisplay(term, "canvas", colors.white)
 
 local text = Text:new {
     name = "text",
     canvas = canvas,
-    width = 30,
-    height = 10,
-    padding = 1,
+    width = canvas.width,
+    height = canvas.height,
+    padding = 0,
     text = paragraph,
     backgroundColor = colors.red,
     textColor = colors.orange,
+    horizontalAlignment = align.center,
+    verticalAlignment = align.center,
     wrapText = false,
 }
 
