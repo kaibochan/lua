@@ -2,16 +2,20 @@ local gui = require "gui"
 
 local width, height = term.getSize()
 
+local canvas = setDisplay(term, "canvas", colors.pink)
+
 local main = Element:new {
     name = "main",
+    canvas = canvas,
     width = width,
     height = height,
 }
 
-registerCallback("mouse_click", main, mainClick)
+registerSelectionCallback("mouse_click", main, mainClick)
 
 local button1 = Text:new {
     name = "button1",
+    canvas = canvas,
     parent = main,
     x = 2,
     text = "lorem ipsum",
@@ -23,7 +27,7 @@ local button1 = Text:new {
     padding = 0,
 }
 
-registerCallback("mouse_click", button1, function(element, event, button, x, y)
+registerSelectionCallback("mouse_click", button1, function(element, event, button, x, y)
     if button == 1 then
         button1:setBackgroundColor(2^math.random(15))
     end
@@ -31,6 +35,7 @@ end)
 
 local button2 = Text:new {
     name = "button2",
+    canvas = canvas,
     parent = main,
     x = 2,
     y = 3,
@@ -43,7 +48,7 @@ local button2 = Text:new {
     padding = 0,
 }
 
-registerCallback("mouse_click", button2, function(element, event, button, x, y)
+registerSelectionCallback("mouse_click", button2, function(element, event, button, x, y)
     if button == 1 then
         button2:setBackgroundColor(2^math.random(15))
     elseif button == 2 then
@@ -53,6 +58,7 @@ end)
 
 local text = Text:new {
     name = "text",
+    canvas = canvas,
     parent = main,
     y = 5,
     text = "lorem ipsum",
@@ -63,7 +69,7 @@ local text = Text:new {
     height = 4,
 }
 
-registerCallback("mouse_drag", text, function(element, event, button, x, y)
+registerSelectionCallback("mouse_drag", text, function(element, event, button, x, y)
     if button == 1 then
         text:setGlobalPos(x, y)
     end
@@ -71,6 +77,7 @@ end)
 
 local childText = Text:new {
     name = "childText",
+    canvas = canvas,
     parent = text,
     text = "a",
     x = 2,
@@ -81,7 +88,7 @@ local childText = Text:new {
     textColor = colors.black,
 }
 
-registerCallback("mouse_drag", childText, function(element, event, button, x, y)
+registerSelectionCallback("mouse_drag", childText, function(element, event, button, x, y)
     if button == 1 then
         childText:setGlobalPos(x, y)
     end
@@ -89,6 +96,7 @@ end)
 
 local textBox = Textbox:new {
     name = "textBox1",
+    canvas = canvas,
     parent = main,
     x = 25,
     y = 2,
@@ -98,19 +106,23 @@ local textBox = Textbox:new {
     textColor = colors.orange,
 }
 
-local selectedElement = main
+local selectedElement
 
 while true do
-    text:setText(selectedElement.name)
+    if selectedElement then
+        text:setText(selectedElement.name)
+    else
+        text:setText("")
+    end
     childText:setText(childText.globalX.." "..childText.globalY)
-    main:draw()
+    canvas:draw()
 
     local event, data1, data2, data3 = os.pullEvent()
     if event == "mouse_click" then
-        selectedElement = getSelectedElement(main, data2, data3)
+        selectedElement = getSelectedElement(canvas, data2, data3)
     end
 
-    if callbacks[event] and callbacks[event][selectedElement.name] then
-        callbacks[event][selectedElement.name](selectedElement, event, data1, data2, data3)
+    if selectedElement and selectionCallbacks[event] and selectionCallbacks[event][selectedElement.name] then
+        selectionCallbacks[event][selectedElement.name](selectedElement, event, data1, data2, data3)
     end
 end

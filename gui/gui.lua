@@ -1,7 +1,27 @@
 --[[
-    registered callbacks for each user input event
+    registered callbacks to happen no matter which element is selected
 ]]
-callbacks = {
+globalCallbacks = {
+    ["mouse_click"] = {},
+    ["mouse_drag"] = {},
+    ["mouse_scroll"] = {},
+    ["mouse_up"] = {},
+    ["key"] = {},
+    ["key_up"] = {},
+    ["char"] = {},
+    ["paste"] = {},
+}
+--[[
+    register callback functions for various mouse and keyboard events
+]]
+function registerGlobalCallback(event, callback)
+    table.insert(globalCallbacks[event], callback)
+end
+
+--[[
+    registered callbacks for each user input event, only occurs if element is selected
+]]
+selectionCallbacks = {
     ["mouse_click"] = {},
     ["mouse_drag"] = {},
     ["mouse_scroll"] = {},
@@ -13,16 +33,39 @@ callbacks = {
 }
 
 --[[
-    register callback functions for various mouse and keyboard events
+    register callback functions for various mouse and keyboard events for a given element
 ]]
-function registerCallback(event, element, callback)
-    if callbacks[event] then
-        callbacks[event][element.name] = callback
+function registerSelectionCallback(event, element, callback)
+    if selectionCallbacks[event] then
+        selectionCallbacks[event][element.name] = callback
     else
-        callbacks[event] = {[element.name] = callback}
+        selectionCallbacks[event] = {[element.name] = callback}
     end
 end
 
+--[[
+    depth first search to find selected element given an x and y
+]]
+function getSelectedElement(element, x, y)
+    local selectedElement
+
+    --iterate over elements backwards to grab elements drawn on top first
+    for i = #element.children, 1, -1 do
+        selectedElement = getSelectedElement(element.children[i], x, y)
+
+        if selectedElement then
+            return selectedElement
+        end
+    end
+
+    if element:selected(x, y) then
+        return element
+    end
+end
+
+--[[
+    alignment options for text elements and derivatives
+]]
 align = {
     top = "top",
     left = "left",
@@ -30,6 +73,24 @@ align = {
     right = "right",
     bottom = "bottom",
 }
+
+--------------------------------
+--Display
+--------------------------------
+
+Display = {
+    device = nil,
+    isMonitor = false,
+    width = 1,
+    height = 1,
+}
+
+function Display:new(o)
+    o = o or {}
+    setmetatable(o, self)
+    self.__index = self
+    return o
+end
 
 --------------------------------
 --Cell
@@ -48,40 +109,30 @@ function Cell:new (o)
     return o
 end
 
+
 --------------------------------
---Element
+--Canvas
 --------------------------------
 
-Element = {
-    class = "Element",
-    parent = nil,
+Canvas = {
+    class = "Canvas",
+    display = nil,
     children = {},
-    globalX = 1,
-    globalY = 1,
-    x = 1,
-    y = 1,
     width = 1,
     height = 1,
-    visible = true,
     backgroundColor = colors.black,
-    transparentBackground = false,
     cells = {},
 }
     
-function Element:new (o)
+function Canvas:new (o)
     o = o or {}
 
-    --tables are passed by reference so new ones must be created if not passed in
+    --tables are passed by reference so new ones must be created
     o.cells = o.cells or {}
     o.children = o.children or {}
 
     setmetatable(o, self)
     self.__index = self
-
-    if o.parent then
-        table.insert(o.parent.children, o)
-        o.globalX, o.globalY = o:getGlobalPos(o.x, o.y)
-    end
 
     local cell
 
@@ -94,6 +145,88 @@ function Element:new (o)
                 table.insert(o.cells[x], y, cell)
             end
         end
+    end
+
+    return o
+end
+
+--[[
+    draw children, then draw to parent's canvas if parent exists, otherwise draw to display
+]]
+function Canvas:draw()
+
+    --reset canvas for drawing to
+    for x = 1, self.width do
+        for y = 1, self.height do
+            self.cells[x][y].backgroundColor = self.backgroundColor
+            self.cells[x][y].character = " "
+        end
+    end
+
+    --draw all children to canvas cells
+    for _, child in ipairs(self.children) do
+        child:draw()
+    end
+
+    --draw canvas cells to the screen
+    for y = 1, self.height do
+        local characters = ""
+        local textColors = ""
+        local backgroundColors = ""
+
+        for x = 1, self.width do
+            characters = characters .. self.cells[x][y].character
+            textColors = textColors .. colors.toBlit(self.cells[x][y].textColor)
+            backgroundColors = backgroundColors ..  colors.toBlit(self.cells[x][y].backgroundColor)
+        end
+
+        self.display.device.setCursorPos(1, y)
+
+        self.display.device.blit(characters, textColors, backgroundColors)
+    end
+end
+
+--[[
+    converts to global coordinates and then test for if x and y are within bounds
+]]
+function Canvas:selected(x, y)
+    return true
+end
+
+--------------------------------
+--Element
+--------------------------------
+
+Element = Canvas:new {
+    class = "Element",
+    canvas = nil,
+    parent = nil,
+    globalX = 1,
+    globalY = 1,
+    x = 1,
+    y = 1,
+    visible = true,
+    transparentBackground = false,
+}
+    
+function Element:new (o)
+    o = o or {}
+    o = Canvas:new(o)
+
+    --tables are passed by reference so new ones must be created if not passed in
+    o.cells = o.cells or {}
+    o.children = o.children or {}
+
+    setmetatable(o, self)
+    self.__index = self
+
+    if o.canvas then
+        table.insert(o.canvas.children, o)
+    end
+
+    if o.parent then
+        table.insert(o.parent.children, o)
+        o.globalX, o.globalY = o:getGlobalPos(o.x, o.y)
     end
 
     return o
@@ -222,25 +355,15 @@ function Element:draw()
     end
 
     --lx and ly are local x, y within an element
-    for ly = 1, self.height do
-        local characters = ""
-        local textColors = ""
-        local backgroundColors = ""
-
-        local gy = ly + self.globalY - 1
-        local gx = self.globalX
-
+    for ly = 1, self.height do        
         for lx = 1, self.width do
-            --px and py are x, y within parent element
+            local gy = ly + self.globalY - 1
+            local gx = lx + self.globalX - 1
 
-            characters = characters .. self.cells[lx][ly].character
-            textColors = textColors .. colors.toBlit(self.cells[lx][ly].textColor)
-            backgroundColors = backgroundColors ..  colors.toBlit(self.cells[lx][ly].backgroundColor)
+            self.canvas.cells[gx][gy].character = self.cells[lx][ly].character
+            self.canvas.cells[gx][gy].textColor = self.cells[lx][ly].textColor
+            self.canvas.cells[gx][gy].backgroundColor = self.cells[lx][ly].backgroundColor
         end
-
-        term.setCursorPos(gx, gy)
-
-        term.blit(characters, textColors, backgroundColors)
     end
 
     for _, child in ipairs(self.children) do
@@ -293,9 +416,9 @@ function Text:new(o)
     o:setText(o.text)
 
     if o.name then
-        registerCallback("key", o, Text.pressShift)
-        registerCallback("mouse_scroll", o, Text.textScroll)
-        registerCallback("key_up", o, Text.releaseShift)
+        registerSelectionCallback("key", o, Text.pressShift)
+        registerSelectionCallback("mouse_scroll", o, Text.textScroll)
+        registerSelectionCallback("key_up", o, Text.releaseShift)
     end
 
     return o
@@ -490,6 +613,7 @@ end
 --------------------------------
 
 Textbox = Text:new{
+    class = "Textbox",
     cursorPos = 0,
     cursorBackgroundColor = colors.white,
     cursorTextColor = colors.black,
@@ -508,8 +632,8 @@ function Textbox:new(o)
     o:setVerticalAlignment(o.verticalAlignment)
 
     if o.name then
-        registerCallback("char", o, Textbox.characterTyped)
-        registerCallback("key", o, Textbox.keyPressed)
+        registerSelectionCallback("char", o, Textbox.characterTyped)
+        registerSelectionCallback("key", o, Textbox.keyPressed)
     end
 
     return o
@@ -673,22 +797,28 @@ function Textbox.keyPressed(txb, event, key, isHeld)
     end
 end
 
---[[
-    depth first search to find selected element given an x and y
-]]
-function getSelectedElement(element, x, y)
-    local selectedElement
-
-    --iterate over elements backwards to grab elements drawn on top first
-    for i = #element.children, 1, -1 do
-        selectedElement = getSelectedElement(element.children[i], x, y)
-
-        if selectedElement then
-            return selectedElement
-        end
+function setDisplay(device, canvasName, backgroundColor)
+    local isMonitor
+    if device.__name and device.__name == "monitor" then
+        isMonitor = true
+    else
+        isMonitor = false
     end
 
-    if element:selected(x, y) then
-        return element
-    end
+    local width, height = device.getSize()
+
+    local display = Display:new {
+        device = device,
+        isMonitor = isMonitor,
+        width = width,
+        height = height,
+    }
+
+    return Canvas:new {
+        name = canvasName,
+        display = display,
+        backgroundColor = backgroundColor,
+        width = display.width,
+        height = display.height,
+    }
 end

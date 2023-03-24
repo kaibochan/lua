@@ -18,17 +18,11 @@ local paragraph =
 .." justo nunc, ullamcorper eget urna ut, fringilla ornare sem.\nFusce bibendum mi nec diam tem"
 .."por, a sodales elit ultrices."
 
-local width, height = term.getSize()
-
-local main = Element:new {
-    name = "main",
-    width = width,
-    height = height,
-}
+local canvas = setDisplay(term, "canvas", colors.white)
 
 local text = Text:new {
     name = "text",
-    parent = main,
+    canvas = canvas,
     width = 30,
     height = 10,
     padding = 1,
@@ -38,30 +32,17 @@ local text = Text:new {
     wrapText = false,
 }
 
-local debug = Text:new {
-    name = "debug",
-    parent = main,
-    x = 31,
-    width = width - 30,
-    height = 10,
-}
-
-local selectedElement = main
-
-local debugText
+local selectedElement
 
 while true do
-    debugText = ""..text.verticalScrollOffset.."\n"..#text.textRows.."\n"..(#text.textRows - text.height + 2 * text.padding)
-    debug:setText(debugText)
-
-    main:draw()
+    canvas:draw()
 
     local event, data1, data2, data3 = os.pullEvent()
     if event == "mouse_click" then
-        selectedElement = getSelectedElement(main, data2, data3)
+        selectedElement = getSelectedElement(canvas, data2, data3)
     end
 
-    if callbacks[event] and callbacks[event][selectedElement.name] then
-        callbacks[event][selectedElement.name](selectedElement, event, data1, data2, data3)
+    if selectedElement and selectionCallbacks[event] and selectionCallbacks[event][selectedElement.name] then
+        selectionCallbacks[event][selectedElement.name](selectedElement, event, data1, data2, data3)
     end
 end
