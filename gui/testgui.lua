@@ -122,7 +122,12 @@ while true do
         selectedElement = getSelectedElement(canvas, data2, data3)
     end
 
-    if selectedElement and selectionCallbacks[event] and selectionCallbacks[event][selectedElement.name] then
-        selectionCallbacks[event][selectedElement.name](selectedElement, event, data1, data2, data3)
+    if selectedElement and selectionCallbacks[event] then --and selectionCallbacks[event][selectedElement.name] then
+        --selectionCallbacks[event][selectedElement.name](selectedElement, event, data1, data2, data3)
+        for index, callbacks in ipairs(selectionCallbacks[event]) do
+            if callbacks.elementName == selectedElement.name and callbacks.callback then
+                callbacks.callback(selectedElement, event, data1, data2, data3)
+            end
+        end
     end
 end
