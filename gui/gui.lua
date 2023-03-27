@@ -1,4 +1,35 @@
 --[[
+    alignment options for text elements and derivatives
+]]
+align = {
+    top = "top",
+    left = "left",
+    center = "center",
+    right = "right",
+    bottom = "bottom",
+}
+
+--[[
+    global flags for shift and control being held
+]]
+shiftHeld = false
+ctrlHeld = false
+
+--[[
+    currently selected element
+]]
+selectedElement = nil
+
+--[[
+    base level elements, used in handleInputEvents to get selected elements
+]]
+baseElements = {}
+
+--------------------------------
+--Callbacks
+--------------------------------
+
+--[[
     registered callbacks to happen no matter which element is selected
 ]]
 globalCallbacks = {
@@ -14,8 +45,16 @@ globalCallbacks = {
 --[[
     register callback functions for various mouse and keyboard events
 ]]
-function registerGlobalCallback(event, callback)
-    table.insert(globalCallbacks[event], callback)
+function registerGlobalCallback(event, callback, callbackName)
+    table.insert(globalCallbacks[event], {callback = callback, callbackName = callbackName})
+end
+
+function removeGlobalCallback(event, callbackName)
+    for index, callback in ipairs(globalCallbacks[event]) do
+        if callback.callbackName == callbackName then
+            table.remove(globalCallbacks, index)
+        end
+    end
 end
 
 --[[
@@ -35,18 +74,41 @@ selectionCallbacks = {
 --[[
     register callback functions for various mouse and keyboard events for a given element
 ]]
-function registerSelectionCallback(event, element, callback)
-    table.insert(selectionCallbacks[event], {elementName = element.name, callback = callback})
+function registerSelectionCallback(event, element, callback, callbackName)
+    table.insert(selectionCallbacks[event], {elementName = element.name, callback = callback, callbackName = callbackName})
 end
 
-function removeSelectionCallback(event, element)
-    for index, callbacks in ipairs(selectionCallbacks[event]) do
-        if callbacks.elementName == element.name then
+function removeSelectionCallback(event, element, callbackName)
+    for index, callback in ipairs(selectionCallbacks[event]) do
+        if callback.elementName == element.name and (callback.callbackName == callbackName or not callback.callbackName) then
             table.remove(selectionCallbacks[event], index)
             break
         end
     end
 end
+
+--[[
+    register key events for shift and control other elements to reference
+]]
+registerGlobalCallback("key", function(event, key, isHeld)
+    local keyName = keys.getName(key)
+
+    if keyName == "leftShift" or keyName == "rightShift" then
+        shiftHeld = true
+    elseif keyName == "leftCtrl" or keyName == "rightCtrl" then
+        ctrlHeld = true
+    end
+end, "pressShiftControl")
+
+registerGlobalCallback("key_up", function(event, key)
+    local keyName = keys.getName(key)
+
+    if keyName == "leftShift" or keyName == "rightShift" then
+        shiftHeld = false
+    elseif keyName == "leftCtrl" or keyName == "rightCtrl" then
+        ctrlHeld = false
+    end
+end, "releaseShiftControl")
 
 --[[
     depth first search to find selected element given an x and y
@@ -68,16 +130,31 @@ function getSelectedElement(element, x, y)
     end
 end
 
---[[
-    alignment options for text elements and derivatives
-]]
-align = {
-    top = "top",
-    left = "left",
-    center = "center",
-    right = "right",
-    bottom = "bottom",
-}
+function handleInputEvents()
+    local event, data1, data2, data3 = os.pullEvent()
+    if globalCallbacks[event] or selectionCallbacks[event] then
+        if event == "mouse_click" then
+            for _, base in ipairs(baseElements) do
+                selectedElement = getSelectedElement(base, data2, data3)
+                if selectedElement then
+                    break
+                end
+            end
+        end
+
+        for _, callback in ipairs(globalCallbacks[event]) do
+            callback.callback(event, data1, data2, data3)
+        end
+
+        if selectedElement and selectionCallbacks[event] then
+            for _, callback in ipairs(selectionCallbacks[event]) do
+                if callback.elementName == selectedElement.name and callback.callback then
+                    callback.callback(selectedElement, event, data1, data2, data3)
+                end
+            end
+        end
+    end
+end
 
 --------------------------------
 --Display
@@ -116,20 +193,22 @@ end
 
 
 --------------------------------
---Canvas
+--Window
 --------------------------------
 
-Canvas = {
-    class = "Canvas",
+Window = {
+    class = "Window",
     display = nil,
     children = {},
+    globalX = 1,
+    globalY = 1,
     width = 1,
     height = 1,
     backgroundColor = colors.black,
     cells = {},
 }
     
-function Canvas:new (o)
+function Window:new (o)
     o = o or {}
 
     --tables are passed by reference so new ones must be created
@@ -156,11 +235,11 @@ function Canvas:new (o)
 end
 
 --[[
-    draw children, then draw to parent's canvas if parent exists, otherwise draw to display
+    draw children, then draw to parent's Window if parent exists, otherwise draw to display
 ]]
-function Canvas:draw()
+function Window:draw()
 
-    --reset canvas for drawing to
+    --reset Window for drawing to
     for x = 1, self.width do
         for y = 1, self.height do
             self.cells[x][y].backgroundColor = self.backgroundColor
@@ -168,12 +247,12 @@ function Canvas:draw()
         end
     end
 
-    --draw all children to canvas cells
+    --draw all children to Window cells
     for _, child in ipairs(self.children) do
         child:draw()
     end
 
-    --draw canvas cells to the screen
+    --draw Window cells to the screen
     for y = 1, self.height do
         local characters = ""
         local textColors = ""
@@ -185,7 +264,7 @@ function Canvas:draw()
             backgroundColors = backgroundColors ..  colors.toBlit(self.cells[x][y].backgroundColor)
         end
 
-        self.display.device.setCursorPos(1, y)
+        self.display.device.setCursorPos(self.globalX, self.globalY + y - 1)
         self.display.device.blit(characters, textColors, backgroundColors)
     end
 end
@@ -193,20 +272,18 @@ end
 --[[
     converts to global coordinates and then test for if x and y are within bounds
 ]]
-function Canvas:selected(x, y)
-    return true
+function Window:selected(x, y)
+    return x >= self.globalX and x < self.globalX + self.width and y >= self.globalY and y < self.globalY + self.height
 end
 
 --------------------------------
 --Element
 --------------------------------
 
-Element = Canvas:new {
+Element = Window:new {
     class = "Element",
-    canvas = nil,
+    window = nil,
     parent = nil,
-    globalX = 1,
-    globalY = 1,
     x = 1,
     y = 1,
     visible = true,
@@ -215,7 +292,10 @@ Element = Canvas:new {
     
 function Element:new (o)
     o = o or {}
-    o = Canvas:new(o)
+
+    local gx, gy = o.globalX, o.globalY
+
+    o = Window:new(o)
 
     --tables are passed by reference so new ones must be created if not passed in
     o.cells = o.cells or {}
@@ -224,13 +304,18 @@ function Element:new (o)
     setmetatable(o, self)
     self.__index = self
 
-    if o.canvas then
-        table.insert(o.canvas.children, o)
+    if o.window then
+        table.insert(o.window.children, o)
     end
 
-    if o.parent then
+    if o.parent and o.parent ~= o.window then
         table.insert(o.parent.children, o)
+    end
+    
+    if not gx and not gy then
         o.globalX, o.globalY = o:getGlobalPos(o.x, o.y)
+    else
+        o:setGlobalPos(o.globalX, o.globalY)
     end
 
     return o
@@ -240,6 +325,8 @@ end
     remove element from previous parent and add to new parent, can also be nil to unparent entirely
 ]]
 function Element:setParent(parent)
+    self.globalX, self.globalyY = self:getGlobalPos(self.x, self.y)
+
     if self.parent then
         for index, child in self.parent.children do
             if child == self then
@@ -253,14 +340,20 @@ function Element:setParent(parent)
         table.insert(self.parent.children, self)
     end
     
-    self.globalX, self.globalY = self:getGlobalPos(o.x, o.y)
+    self:setGlobalPos(self.globalX, self.globalY)
 end
 
 function Element:setGlobalPos(x, y)
     self.globalX = x
     self.globalY = y
 
-    self.x, self.y = self:getParentLocalPos(x, y)
+    if self.parent then
+        self.x = self.globalX - self.parent.globalX + 1
+        self.y = self.globalY - self.parent.globalY + 1
+    else
+        self.x = self.globalX
+        self.y = self.globalY
+    end
 
     for _, child in ipairs(self.children) do
         child:setPos(child.x, child.y)
@@ -306,19 +399,11 @@ end
     gets the global coordinates of an element
 ]]
 function Element:getGlobalPos(x, y)
-    --global x, y
-    local gx, gy
-
-    local element = self
-    gx = element.x
-    gy = element.y
-    while element.parent do
-        gx = gx + element.parent.x - 1
-        gy = gy + element.parent.y - 1
-        element = element.parent
+    if self.parent then
+        return self.parent.globalX + self.x - 1, self.parent.globalY + self.y - 1
     end
 
-    return gx, gy
+    return self.x, self.y
 end
 
 --[[
@@ -351,7 +436,7 @@ function Element:setVisibility(isVisible)
 end
 
 --[[
-    draw children, then draw to parent's canvas if parent exists, otherwise draw to display
+    draw children, then draw to parent's window if parent exists, otherwise draw to display
 ]]
 function Element:draw()
     if not self.visible then
@@ -361,12 +446,12 @@ function Element:draw()
     --lx and ly are local x, y within an element
     for ly = 1, self.height do        
         for lx = 1, self.width do
-            local gy = ly + self.globalY - 1
-            local gx = lx + self.globalX - 1
+            local wy = ly + self.globalY - self.window.globalY
+            local wx = lx + self.globalX - self.window.globalX
 
-            self.canvas.cells[gx][gy].character = self.cells[lx][ly].character
-            self.canvas.cells[gx][gy].textColor = self.cells[lx][ly].textColor
-            self.canvas.cells[gx][gy].backgroundColor = self.cells[lx][ly].backgroundColor
+            self.window.cells[wx][wy].character = self.cells[lx][ly].character
+            self.window.cells[wx][wy].textColor = self.cells[lx][ly].textColor
+            self.window.cells[wx][wy].backgroundColor = self.cells[lx][ly].backgroundColor
         end
     end
 
@@ -417,10 +502,7 @@ Text = Element:new {
     padding = 0,
     horizontalAlignment = align.left,
     verticalAlignment = align.top,
-    verticalOffset = 0,
-    horizontalOffsets = {},
     scrollable = false,
-    shiftHeld = false,
     verticalScrollOffset = 0,
     wrapText = true,
     horizontalScrollOffset = 0,
@@ -452,18 +534,10 @@ function Text:new(o)
     o:setText(o.text)
 
     if o.name then
-        registerSelectionCallback("key", o, Text.pressShift)
-        registerSelectionCallback("mouse_scroll", o, Text.textScroll)
-        registerSelectionCallback("key_up", o, Text.releaseShift)
+        registerSelectionCallback("mouse_scroll", o, Text.textScroll, "textScroll")
     end
 
     return o
-end
-
-function Text.pressShift(txt, event, key, isHeld)
-    if keys.getName(key) == "leftShift" or keys.getName(key) == "rightShift" then
-        txt.shiftHeld = true
-    end
 end
 
 function Text:horizontalScroll(scrollDir)
@@ -493,16 +567,10 @@ function Text:verticalScroll(scrollDir)
 end
 
 function Text.textScroll(txt, event, scrollDir, x, y)
-    if txt.shiftHeld then
+    if shiftHeld then
         txt:horizontalScroll(scrollDir)
     else
         txt:verticalScroll(scrollDir)
-    end
-end
-
-function Text.releaseShift(txt, event, key)
-    if keys.getName(key) == "leftShift" or keys.getName(key) == "rightShift" then
-        txt.shiftHeld = false
     end
 end
 
@@ -673,6 +741,7 @@ Textbox = Text:new{
     cursorTextColor = colors.black,
     cursorRowOffset = 0,
     cursorRowIndex = 1,
+    enterSubmits = false,
 }
 
 function Textbox:new(o)
@@ -688,10 +757,12 @@ function Textbox:new(o)
     o:setCursorPos(0)
 
     if o.name then
-        registerSelectionCallback("char", o, Textbox.characterTyped)
-        registerSelectionCallback("key", o, Textbox.keyPressed)
-        removeSelectionCallback("mouse_scroll", o)
-        registerSelectionCallback("mouse_scroll", o, Textbox.textScroll)
+        registerSelectionCallback("char", o, Textbox.characterTyped, "characterTyped")
+        registerSelectionCallback("key", o, Textbox.keyPressed, "keyPressed")
+        registerSelectionCallback("mouse_click", o, Textbox.mouseClicked, "mouseClicked")
+
+        removeSelectionCallback("mouse_scroll", o, "textScroll")
+        registerSelectionCallback("mouse_scroll", o, Textbox.textScroll, "textScroll")
     end
 
     return o
@@ -701,7 +772,7 @@ end
     scroll texbox window and update cursor position
 ]]
 function Textbox.textScroll(txb, event, scrollDir, x, y)
-    if txb.shiftHeld then
+    if shiftHeld then
         txb:eraseCursor()
         txb:horizontalScroll(scrollDir)
         txb:drawCursor()
@@ -883,7 +954,8 @@ function Textbox.keyPressed(txb, event, key, isHeld)
         local cursorY = txb:getCursorPosY()
 
         txb:setCursorPosXY(cursorX, cursorY + 1)
-    elseif keyName == "enter" then
+    elseif keyName == "enter" and not txb.enterSubmits then
+        txb:eraseCursor()
         txb:insertCharacter("\n")
     elseif keyName == "backspace" and txb.cursorPos > 0 then
         txb:eraseCursor()
@@ -901,9 +973,21 @@ function Textbox.keyPressed(txb, event, key, isHeld)
 end
 
 --[[
-    set display and return canvas linked to it
+    handle mouse clicks for textbox element
 ]]
-function setDisplay(device, canvasName, backgroundColor)
+function Textbox.mouseClicked(txb, event, button, x, y)
+    if button == 1 then
+        local lx = 1 + x - txb.globalX
+        local ly = 1 + y - txb.globalY
+
+        txb:setCursorPosXY(lx, ly)
+    end
+end
+
+--[[
+    set display and return window linked to it
+]]
+function createWindow(device, windowName, backgroundColor, x, y, width, height)
     local isMonitor
     if device.__name and device.__name == "monitor" then
         isMonitor = true
@@ -911,7 +995,14 @@ function setDisplay(device, canvasName, backgroundColor)
         isMonitor = false
     end
 
-    local width, height = device.getSize()
+    if not x and not y then
+        x = 1
+        y = 1
+    end
+
+    if not width and not height then
+        width, height = device.getSize()
+    end
 
     local display = Display:new {
         device = device,
@@ -920,11 +1011,17 @@ function setDisplay(device, canvasName, backgroundColor)
         height = height,
     }
 
-    return Canvas:new {
-        name = canvasName,
+    local window = Window:new {
+        name = windowName,
         display = display,
         backgroundColor = backgroundColor,
+        globalX = x,
+        globalY = y,
         width = display.width,
         height = display.height,
     }
+
+    table.insert(baseElements, window)
+
+    return window
 end

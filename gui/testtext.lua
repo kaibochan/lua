@@ -1,6 +1,6 @@
 local gui = require "gui"
 
-local paragraph = 
+local paragraph1 = 
 "Lorem ipsum dolor sit amet, consectetur adipiscing elit.\nPellentesque gravida porttitor elit,"
 .."quis blandit erat rutrum in.\nNulla ut rhoncus elit, vel placerat lacus.\nIn hac habitasse pl"
 .."atea dictumst.\nDuis non magna felis.\nSed gravida leo rhoncus felis imperdiet lacinia.\nEtiam"
@@ -11,23 +11,27 @@ local paragraph =
 .."um tempor.\nNam tincidunt efficitur massa.\nSed pulvinar nibh eget ullamcorper tempus.\nIn a o"
 .."dio eget neque varius hendrerit pellentesque quis ipsum.\n\n"
 
-.."Ut a velit felis.\nMauris erat sapien, pharetra non libero id, auctor vulputate mauris.\nSed "
+local paragraph2 =
+"Ut a velit felis.\nMauris erat sapien, pharetra non libero id, auctor vulputate mauris.\nSed "
 .."at ullamcorper ante.\nUt nec odio eu eros sodales tempus.\nMaecenas consequat lacus in enim c"
 .."ondimentum imperdiet.\nVivamus dapibus auctor leo, eu convallis tortor condimentum eu.\nDonec"
 .." ornare libero a tincidunt sodales.\nMorbi elementum odio congue arcu convallis feugiat.\nNam"
 .." justo nunc, ullamcorper eget urna ut, fringilla ornare sem.\nFusce bibendum mi nec diam tem"
 .."por, a sodales elit ultrices."
 
+local width, height = term.getSize()
 
-local canvas = setDisplay(term, "canvas", colors.white)
+local window1 = createWindow(term, "window1", colors.white, 1, 1, math.floor(width / 2), height)
+local window2 = createWindow(term, "window2", colors.black, math.floor(width / 2) + 1, 1, math.floor(width / 2), height)
 
-local text = Textbox:new {
-    name = "text",
-    canvas = canvas,
-    width = canvas.width,
-    height = canvas.height,
-    padding = 0,
-    text = paragraph,
+local txb1 = Textbox:new {
+    name = "txb1",
+    parent = window1,
+    window = window1,
+    width = window1.width,
+    height = window1.height,
+    padding = 1,
+    text = paragraph1,
     backgroundColor = colors.red,
     textColor = colors.orange,
     horizontalAlignment = align.left,
@@ -35,22 +39,25 @@ local text = Textbox:new {
     wrapText = false,
 }
 
-local selectedElement
+local txb2 = Textbox:new {
+    name = "txb2",
+    parent = window2,
+    window = window2,
+    width = window2.width,
+    height = window2.height,
+    padding = 1,
+    text = paragraph1,
+    backgroundColor = colors.black,
+    textColor = colors.white,
+    horizontalAlignment = align.left,
+    verticalAlignment = align.top,
+    wrapText = false,
+}
+
 
 while true do
-    canvas:draw()
+    window1:draw()
+    window2:draw()
 
-    local event, data1, data2, data3 = os.pullEvent()
-    if event == "mouse_click" then
-        selectedElement = getSelectedElement(canvas, data2, data3)
-    end
-
-    if selectedElement and selectionCallbacks[event] then --and selectionCallbacks[event][selectedElement.name] then
-        --selectionCallbacks[event][selectedElement.name](selectedElement, event, data1, data2, data3)
-        for index, callbacks in ipairs(selectionCallbacks[event]) do
-            if callbacks.elementName == selectedElement.name and callbacks.callback then
-                callbacks.callback(selectedElement, event, data1, data2, data3)
-            end
-        end
-    end
+    parallel.waitForAny(handleInputEvents)
 end

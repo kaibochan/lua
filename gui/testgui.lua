@@ -2,20 +2,18 @@ local gui = require "gui"
 
 local width, height = term.getSize()
 
-local canvas = setDisplay(term, "canvas", colors.pink)
+local window = createWindow(term, "window", colors.pink)
 
 local main = Element:new {
     name = "main",
-    canvas = canvas,
+    window = window,
     width = width,
     height = height,
 }
 
-registerSelectionCallback("mouse_click", main, mainClick)
-
 local button1 = Text:new {
     name = "button1",
-    canvas = canvas,
+    window = window,
     parent = main,
     x = 2,
     text = "lorem ipsum",
@@ -31,11 +29,11 @@ registerSelectionCallback("mouse_click", button1, function(element, event, butto
     if button == 1 then
         button1:setBackgroundColor(2^math.random(15))
     end
-end)
+end, "buttonClick")
 
 local button2 = Text:new {
     name = "button2",
-    canvas = canvas,
+    window = window,
     parent = main,
     x = 2,
     y = 3,
@@ -54,11 +52,11 @@ registerSelectionCallback("mouse_click", button2, function(element, event, butto
     elseif button == 2 then
         button2:setTextColor(2^math.random(15))
     end
-end)
+end, "buttonClick")
 
 local text = Text:new {
     name = "text",
-    canvas = canvas,
+    window = window,
     parent = main,
     y = 5,
     text = "lorem ipsum",
@@ -73,11 +71,11 @@ registerSelectionCallback("mouse_drag", text, function(element, event, button, x
     if button == 1 then
         text:setGlobalPos(x, y)
     end
-end)
+end, "mouseDrag")
 
 local childText = Text:new {
     name = "childText",
-    canvas = canvas,
+    window = window,
     parent = text,
     text = "a",
     x = 2,
@@ -92,11 +90,11 @@ registerSelectionCallback("mouse_drag", childText, function(element, event, butt
     if button == 1 then
         childText:setGlobalPos(x, y)
     end
-end)
+end, "mouseDrag")
 
 local textBox = Textbox:new {
     name = "textBox1",
-    canvas = canvas,
+    window = window,
     parent = main,
     x = 25,
     y = 2,
@@ -106,8 +104,6 @@ local textBox = Textbox:new {
     textColor = colors.orange,
 }
 
-local selectedElement
-
 while true do
     if selectedElement then
         text:setText(selectedElement.name)
@@ -115,19 +111,7 @@ while true do
         text:setText("")
     end
     childText:setText(childText.globalX.." "..childText.globalY)
-    canvas:draw()
+    window:draw()
 
-    local event, data1, data2, data3 = os.pullEvent()
-    if event == "mouse_click" then
-        selectedElement = getSelectedElement(canvas, data2, data3)
-    end
-
-    if selectedElement and selectionCallbacks[event] then --and selectionCallbacks[event][selectedElement.name] then
-        --selectionCallbacks[event][selectedElement.name](selectedElement, event, data1, data2, data3)
-        for index, callbacks in ipairs(selectionCallbacks[event]) do
-            if callbacks.elementName == selectedElement.name and callbacks.callback then
-                callbacks.callback(selectedElement, event, data1, data2, data3)
-            end
-        end
-    end
+    parallel.waitForAny(handleInputEvents())
 end
