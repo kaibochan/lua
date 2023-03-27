@@ -23,7 +23,7 @@ selectedElement = nil
 --[[
     base level elements, used in handleInputEvents to get selected elements
 ]]
-baseElements = {}
+canvases = {}
 
 --------------------------------
 --Callbacks
@@ -134,7 +134,7 @@ function handleInputEvents()
     local event, data1, data2, data3 = os.pullEvent()
     if globalCallbacks[event] or selectionCallbacks[event] then
         if event == "mouse_click" then
-            for _, base in ipairs(baseElements) do
+            for _, base in ipairs(canvases) do
                 selectedElement = getSelectedElement(base, data2, data3)
                 if selectedElement then
                     break
@@ -191,13 +191,12 @@ function Cell:new (o)
     return o
 end
 
-
 --------------------------------
---Window
+--Canvas
 --------------------------------
 
-Window = {
-    class = "Window",
+Canvas = {
+    class = "Canvas",
     display = nil,
     children = {},
     globalX = 1,
@@ -208,7 +207,7 @@ Window = {
     cells = {},
 }
     
-function Window:new (o)
+function Canvas:new (o)
     o = o or {}
 
     --tables are passed by reference so new ones must be created
@@ -235,11 +234,11 @@ function Window:new (o)
 end
 
 --[[
-    draw children, then draw to parent's Window if parent exists, otherwise draw to display
+    draw children, then draw to parent's canvas if parent exists, otherwise draw to display
 ]]
-function Window:draw()
+function Canvas:draw()
 
-    --reset Window for drawing to
+    --reset canvas for drawing to
     for x = 1, self.width do
         for y = 1, self.height do
             self.cells[x][y].backgroundColor = self.backgroundColor
@@ -247,12 +246,12 @@ function Window:draw()
         end
     end
 
-    --draw all children to Window cells
+    --draw all children to canvas cells
     for _, child in ipairs(self.children) do
         child:draw()
     end
 
-    --draw Window cells to the screen
+    --draw canvas cells to the screen
     for y = 1, self.height do
         local characters = ""
         local textColors = ""
@@ -272,7 +271,7 @@ end
 --[[
     converts to global coordinates and then test for if x and y are within bounds
 ]]
-function Window:selected(x, y)
+function Canvas:selected(x, y)
     return x >= self.globalX and x < self.globalX + self.width and y >= self.globalY and y < self.globalY + self.height
 end
 
@@ -280,9 +279,9 @@ end
 --Element
 --------------------------------
 
-Element = Window:new {
+Element = Canvas:new {
     class = "Element",
-    window = nil,
+    canvas = nil,
     parent = nil,
     x = 1,
     y = 1,
@@ -295,7 +294,7 @@ function Element:new (o)
 
     local gx, gy = o.globalX, o.globalY
 
-    o = Window:new(o)
+    o = Canvas:new(o)
 
     --tables are passed by reference so new ones must be created if not passed in
     o.cells = o.cells or {}
@@ -304,11 +303,11 @@ function Element:new (o)
     setmetatable(o, self)
     self.__index = self
 
-    if o.window then
-        table.insert(o.window.children, o)
+    if o.canvas then
+        table.insert(o.canvas.children, o)
     end
 
-    if o.parent and o.parent ~= o.window then
+    if o.parent and o.parent ~= o.canvas then
         table.insert(o.parent.children, o)
     end
     
@@ -436,7 +435,7 @@ function Element:setVisibility(isVisible)
 end
 
 --[[
-    draw children, then draw to parent's window if parent exists, otherwise draw to display
+    draw children, then draw to parent's canvas if parent exists, otherwise draw to display
 ]]
 function Element:draw()
     if not self.visible then
@@ -446,12 +445,12 @@ function Element:draw()
     --lx and ly are local x, y within an element
     for ly = 1, self.height do        
         for lx = 1, self.width do
-            local wy = ly + self.globalY - self.window.globalY
-            local wx = lx + self.globalX - self.window.globalX
+            local wy = ly + self.globalY - self.canvas.globalY
+            local wx = lx + self.globalX - self.canvas.globalX
 
-            self.window.cells[wx][wy].character = self.cells[lx][ly].character
-            self.window.cells[wx][wy].textColor = self.cells[lx][ly].textColor
-            self.window.cells[wx][wy].backgroundColor = self.cells[lx][ly].backgroundColor
+            self.canvas.cells[wx][wy].character = self.cells[lx][ly].character
+            self.canvas.cells[wx][wy].textColor = self.cells[lx][ly].textColor
+            self.canvas.cells[wx][wy].backgroundColor = self.cells[lx][ly].backgroundColor
         end
     end
 
@@ -769,7 +768,7 @@ function Textbox:new(o)
 end
 
 --[[
-    scroll texbox window and update cursor position
+    scroll texbox canvas and update cursor position
 ]]
 function Textbox.textScroll(txb, event, scrollDir, x, y)
     if shiftHeld then
@@ -854,7 +853,7 @@ function Textbox:drawCursor()
 end
 
 --[[
-    move the view window along with the cursor
+    move the view canvas along with the cursor
 ]]
 function Textbox:scrollCursorIntoBounds()
     local cursorX = self:getCursorPosX()
@@ -985,9 +984,9 @@ function Textbox.mouseClicked(txb, event, button, x, y)
 end
 
 --[[
-    set display and return window linked to it
+    set display and return canvas linked to it
 ]]
-function createWindow(device, windowName, backgroundColor, x, y, width, height)
+function createCanvas(device, canvasName, backgroundColor, x, y, width, height)
     local isMonitor
     if device.__name and device.__name == "monitor" then
         isMonitor = true
@@ -1011,8 +1010,8 @@ function createWindow(device, windowName, backgroundColor, x, y, width, height)
         height = height,
     }
 
-    local window = Window:new {
-        name = windowName,
+    local canvas = Canvas:new {
+        name = canvasName,
         display = display,
         backgroundColor = backgroundColor,
         globalX = x,
@@ -1021,7 +1020,7 @@ function createWindow(device, windowName, backgroundColor, x, y, width, height)
         height = display.height,
     }
 
-    table.insert(baseElements, window)
+    table.insert(canvases, canvas)
 
-    return window
+    return canvas
 end

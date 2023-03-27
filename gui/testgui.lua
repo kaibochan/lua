@@ -2,18 +2,18 @@ local gui = require "gui"
 
 local width, height = term.getSize()
 
-local window = createWindow(term, "window", colors.pink)
+local canvas = createCanvas(term, "canvas", colors.pink)
 
 local main = Element:new {
     name = "main",
-    window = window,
+    canvas = canvas,
     width = width,
     height = height,
 }
 
 local button1 = Text:new {
     name = "button1",
-    window = window,
+    canvas = canvas,
     parent = main,
     x = 2,
     text = "lorem ipsum",
@@ -33,7 +33,7 @@ end, "buttonClick")
 
 local button2 = Text:new {
     name = "button2",
-    window = window,
+    canvas = canvas,
     parent = main,
     x = 2,
     y = 3,
@@ -56,7 +56,7 @@ end, "buttonClick")
 
 local text = Text:new {
     name = "text",
-    window = window,
+    canvas = canvas,
     parent = main,
     y = 5,
     text = "lorem ipsum",
@@ -75,7 +75,7 @@ end, "mouseDrag")
 
 local childText = Text:new {
     name = "childText",
-    window = window,
+    canvas = canvas,
     parent = text,
     text = "a",
     x = 2,
@@ -94,7 +94,7 @@ end, "mouseDrag")
 
 local textBox = Textbox:new {
     name = "textBox1",
-    window = window,
+    canvas = canvas,
     parent = main,
     x = 25,
     y = 2,
@@ -111,7 +111,7 @@ while true do
         text:setText("")
     end
     childText:setText(childText.globalX.." "..childText.globalY)
-    window:draw()
+    canvas:draw()
 
     parallel.waitForAny(handleInputEvents())
 end
