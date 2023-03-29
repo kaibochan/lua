@@ -21,15 +21,15 @@ local paragraph2 =
 
 local width, height = term.getSize()
 
-local canvas1 = createCanvas(term, "canvas1", colors.white, 1, 1, math.floor(width / 2), height)
-local canvas2 = createCanvas(term, "canvas2", colors.black, math.floor(width / 2) + 1, 1, math.floor(width / 2), height)
+local buffer1 = createBuffer(term, "buffer1", colors.white, 1, 1, math.floor(width / 2), height)
+local buffer2 = createBuffer(term, "buffer2", colors.black, math.floor(width / 2) + 1, 1, math.floor(width / 2), height)
 
 local txb1 = Textbox:new {
     name = "txb1",
-    parent = canvas1,
-    canvas = canvas1,
-    width = canvas1.width,
-    height = canvas1.height,
+    parent = buffer1,
+    buffer = buffer1,
+    width = buffer1.width,
+    height = buffer1.height,
     padding = 1,
     text = paragraph1,
     backgroundColor = colors.red,
@@ -41,10 +41,10 @@ local txb1 = Textbox:new {
 
 local txb2 = Textbox:new {
     name = "txb2",
-    parent = canvas2,
-    canvas = canvas2,
-    width = canvas2.width,
-    height = canvas2.height,
+    parent = buffer2,
+    buffer = buffer2,
+    width = buffer2.width,
+    height = buffer2.height,
     padding = 1,
     text = paragraph1,
     backgroundColor = colors.black,
@@ -56,8 +56,8 @@ local txb2 = Textbox:new {
 
 
 while true do
-    canvas1:draw()
-    canvas2:draw()
+    buffer1:draw()
+    buffer2:draw()
 
     parallel.waitForAny(handleInputEvents)
 end

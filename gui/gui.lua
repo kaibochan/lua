@@ -23,7 +23,7 @@ selectedElement = nil
 --[[
     base level elements, used in handleInputEvents to get selected elements
 ]]
-canvases = {}
+buffers = {}
 
 --------------------------------
 --Callbacks
@@ -33,6 +33,7 @@ canvases = {}
     registered callbacks to happen no matter which element is selected
 ]]
 globalCallbacks = {
+    ["monitor_touch"] = {},
     ["mouse_click"] = {},
     ["mouse_drag"] = {},
     ["mouse_scroll"] = {},
@@ -61,6 +62,7 @@ end
     registered callbacks for each user input event, only occurs if element is selected
 ]]
 selectionCallbacks = {
+    ["monitor_touch"] = {},
     ["mouse_click"] = {},
     ["mouse_drag"] = {},
     ["mouse_scroll"] = {},
@@ -110,23 +112,35 @@ registerGlobalCallback("key_up", function(event, key)
     end
 end, "releaseShiftControl")
 
+function handleMouseClick(buffer, button, x, y)
+    if button == 1 then
+        return getSelectedElement(buffer, x, y)
+    end
+end
+
+function handleMonitorTouch(buffer, side, x, y)
+    if buffer.display.side == side then
+        return getSelectedElement(buffer, x, y)
+    end
+end
+
 --[[
     depth first search to find selected element given an x and y
 ]]
-function getSelectedElement(element, x, y)
+function getSelectedElement(buffer, x, y)
     local selectedElement
 
     --iterate over elements backwards to grab elements drawn on top first
-    for i = #element.children, 1, -1 do
-        selectedElement = getSelectedElement(element.children[i], x, y)
+    for i = #buffer.children, 1, -1 do
+        selectedElement = getSelectedElement(buffer.children[i], x, y)
 
         if selectedElement then
             return selectedElement
         end
     end
 
-    if element:selected(x, y) then
-        return element
+    if buffer:selected(x, y) then
+        return buffer
     end
 end
 
@@ -134,8 +148,15 @@ function handleInputEvents()
     local event, data1, data2, data3 = os.pullEvent()
     if globalCallbacks[event] or selectionCallbacks[event] then
         if event == "mouse_click" then
-            for _, base in ipairs(canvases) do
-                selectedElement = getSelectedElement(base, data2, data3)
+            for _, buffer in ipairs(buffers) do
+                selectedElement = handleMouseClick(buffer, data1, data2, data3)
+                if selectedElement then
+                    break
+                end
+            end
+        elseif event == "monitor_touch" then
+            for _, buffer in ipairs(buffers) do
+                selectedElement = handleMonitorTouch(buffer, data1, data2, data3)
                 if selectedElement then
                     break
                 end
@@ -163,6 +184,7 @@ end
 Display = {
     device = nil,
     isMonitor = false,
+    side = nil,
     width = 1,
     height = 1,
 }
@@ -192,11 +214,11 @@ function Cell:new (o)
 end
 
 --------------------------------
---Canvas
+--Buffer
 --------------------------------
 
-Canvas = {
-    class = "Canvas",
+Buffer = {
+    class = "Buffer",
     display = nil,
     children = {},
     globalX = 1,
@@ -207,7 +229,7 @@ Canvas = {
     cells = {},
 }
     
-function Canvas:new (o)
+function Buffer:new (o)
     o = o or {}
 
     --tables are passed by reference so new ones must be created
@@ -234,11 +256,11 @@ function Canvas:new (o)
 end
 
 --[[
-    draw children, then draw to parent's canvas if parent exists, otherwise draw to display
+    draw children, then draw to parent's buffer if parent exists, otherwise draw to display
 ]]
-function Canvas:draw()
+function Buffer:draw()
 
-    --reset canvas for drawing to
+    --reset buffer for drawing to
     for x = 1, self.width do
         for y = 1, self.height do
             self.cells[x][y].backgroundColor = self.backgroundColor
@@ -246,12 +268,12 @@ function Canvas:draw()
         end
     end
 
-    --draw all children to canvas cells
+    --draw all children to buffer cells
     for _, child in ipairs(self.children) do
         child:draw()
     end
 
-    --draw canvas cells to the screen
+    --draw buffer cells to the screen
     for y = 1, self.height do
         local characters = ""
         local textColors = ""
@@ -271,7 +293,7 @@ end
 --[[
     converts to global coordinates and then test for if x and y are within bounds
 ]]
-function Canvas:selected(x, y)
+function Buffer:selected(x, y)
     return x >= self.globalX and x < self.globalX + self.width and y >= self.globalY and y < self.globalY + self.height
 end
 
@@ -279,9 +301,9 @@ end
 --Element
 --------------------------------
 
-Element = Canvas:new {
+Element = Buffer:new {
     class = "Element",
-    canvas = nil,
+    buffer = nil,
     parent = nil,
     x = 1,
     y = 1,
@@ -292,9 +314,10 @@ Element = Canvas:new {
 function Element:new (o)
     o = o or {}
 
-    local gx, gy = o.globalX, o.globalY
+    local gx = o.globalX
+    local gy = o.globalY
 
-    o = Canvas:new(o)
+    o = Buffer:new(o)
 
     --tables are passed by reference so new ones must be created if not passed in
     o.cells = o.cells or {}
@@ -303,11 +326,11 @@ function Element:new (o)
     setmetatable(o, self)
     self.__index = self
 
-    if o.canvas then
-        table.insert(o.canvas.children, o)
+    if o.buffer then
+        table.insert(o.buffer.children, o)
     end
 
-    if o.parent and o.parent ~= o.canvas then
+    if o.parent and o.parent ~= o.buffer then
         table.insert(o.parent.children, o)
     end
     
@@ -435,7 +458,7 @@ function Element:setVisibility(isVisible)
 end
 
 --[[
-    draw children, then draw to parent's canvas if parent exists, otherwise draw to display
+    draw children, then draw to parent's buffer if parent exists, otherwise draw to display
 ]]
 function Element:draw()
     if not self.visible then
@@ -445,17 +468,264 @@ function Element:draw()
     --lx and ly are local x, y within an element
     for ly = 1, self.height do        
         for lx = 1, self.width do
-            local wy = ly + self.globalY - self.canvas.globalY
-            local wx = lx + self.globalX - self.canvas.globalX
+            local wy = ly + self.globalY - self.buffer.globalY
+            local wx = lx + self.globalX - self.buffer.globalX
 
-            self.canvas.cells[wx][wy].character = self.cells[lx][ly].character
-            self.canvas.cells[wx][wy].textColor = self.cells[lx][ly].textColor
-            self.canvas.cells[wx][wy].backgroundColor = self.cells[lx][ly].backgroundColor
+            if self.cells[lx][ly].backgroundColor ~= 0 then
+                self.buffer.cells[wx][wy].character = self.cells[lx][ly].character
+                self.buffer.cells[wx][wy].textColor = self.cells[lx][ly].textColor
+                self.buffer.cells[wx][wy].backgroundColor = self.cells[lx][ly].backgroundColor
+            end
         end
     end
 
     for _, child in ipairs(self.children) do
         child:draw()
+    end
+end
+
+--------------------------------
+--Canvas
+--------------------------------
+
+Canvas = Element:new {
+    backgroundColor = colors.white,
+    currentColor = colors.black,
+    maxUndo = 100,
+    cellsHistory = {},
+    historyIndex = 1,
+    currentDrawAction = nil,
+    -- selectionBox = nil,
+}
+
+function Canvas:new(o)
+    o = o or {}
+
+    if not o.backgroundColor then
+        o.backgroundColor = Canvas.backgroundColor
+    end
+
+    o = Element:new(o)
+
+    setmetatable(o, self)
+    self.__index = self
+
+    o:addNewHistory()
+
+    for x = 1, o.width do
+        for y = 1, o.height do
+            table.insert(o.cellsHistory[o.historyIndex], {["x"] = x, ["y"] = y, ["backgroundColor"] = o.backgroundColor})
+        end
+    end
+
+    -- o.selectionBox = Element:new {
+    --     name = o.name.."_selectionBox",
+    --     parent = o,
+    --     buffer = o.buffer,
+    --     visible = false,
+    -- }
+
+    o.currentDrawAction = Canvas.pen
+
+    if not o.buffer.display.isMonitor then
+        registerSelectionCallback("mouse_click", o, Canvas.mouseClick, "mouseClick")
+        registerSelectionCallback("key", o, Canvas.keyPressed, "keyPressed")
+    else
+        registerSelectionCallback("monitor_touch", o, Canvas.monitorTouch, "monitorTouch")
+    end
+
+    return o
+end
+
+--[[
+    sets a specific cell to a given color
+    x, y are local x and y values
+]]
+function Canvas:setCell(x, y, color)
+    if self.cells[x][y].backgroundColor == color then
+        return
+    end
+
+    table.insert(self.cellsHistory[self.historyIndex + 1], {["x"] = x, ["y"] = y, ["backgroundColor"] = self.cells[x][y].backgroundColor})
+    self.cells[x][y].backgroundColor = color
+    table.insert(self.cellsHistory[self.historyIndex], {["x"] = x, ["y"] = y, ["backgroundColor"] = self.cells[x][y].backgroundColor})
+end
+
+function Canvas:addNewHistory()
+    table.insert(self.cellsHistory, self.historyIndex, {})
+    if #self.cellsHistory > self.maxUndo then
+        table.remove(self.cellsHistory, self.maxUndo + 1)
+    end
+
+    for i = 1, self.historyIndex - 1 do
+        table.remove(self.cellsHistory, 1)
+    end
+
+    self.historyIndex = 1
+end
+
+--[[
+    utility function used for setting values in 2D arrays such as nodes in fill
+]]
+function Canvas.setValue(tab, i, j, value)
+    if not tab[i] then
+        table.insert(tab, i, {[j] = value})
+    else
+        table.insert(tab[i], j, value)
+    end
+end
+
+--[[
+    utility function used for getting values from 2D arrays such as nodes in fill
+]]
+function Canvas.getValue(tab, i, j)
+    if tab and tab[i] and tab[i][j] then
+        return tab[i][j]
+    end
+end
+
+--[[
+    changes one cell on the canvas to a different color
+    x, y are local x and y values
+]]
+function Canvas:pen(x, y)
+    if x < 1 or x > self.width or y < 1 or y > self.height
+    or self.cells[x][y].backgroundColor == self.currentColor then
+        return
+    end
+
+    self:addNewHistory()
+    self:setCell(x, y, self.currentColor)
+end
+
+--[[
+    uses a flood fill algorithm to fill cells with a given color
+    x, y are local x and y values
+]]
+function Canvas:fill(startX, startY)
+    if startX < 1 or startX > self.width or startY < 1 or startY > self.height
+    or self.cells[startX][startY].backgroundColor == self.currentColor then
+        return
+    end
+
+    local colorToReplace = self.cells[startX][startY].backgroundColor
+
+    --toProcess contains potential cells to be filled
+    local toProcess = {}
+    table.insert(toProcess, {["x"] = startX, ["y"] = startY})
+    
+    --nodes contains all already processed cells to avoid processing again
+    local nodes = {}
+    Canvas.setValue(nodes, startX, startY, colorToReplace)
+
+    local cellsToFill = {}
+    local x, y
+
+    while #toProcess ~= 0 do
+        x = toProcess[1].x
+        y = toProcess[1].y
+
+        --[[
+            if current cell is of the same color as the cell selected then add all
+            it's adjacent neighbors to toProcess to be processed in another iteration
+        ]]
+        if self.cells[x][y].backgroundColor == colorToReplace then
+            table.insert(cellsToFill, {["x"] = x, ["y"] = y})
+
+            --add adjacent, unprocessed pixels to toProcess
+            if x + 1 <= self.width and not Canvas.getValue(nodes, x + 1, y) then
+                table.insert(toProcess, {["x"] = x + 1, ["y"] = y})
+                Canvas.setValue(nodes, x + 1, y, colorToReplace)
+            end
+
+            if x - 1 >= 1 and not Canvas.getValue(nodes, x - 1, y) then
+                table.insert(toProcess, {["x"] = x - 1, ["y"] = y})
+                Canvas.setValue(nodes, x - 1, y, colorToReplace)
+            end
+
+            if y + 1 <= self.height and not Canvas.getValue(nodes, x, y + 1) then
+                table.insert(toProcess, {["x"] = x, ["y"] = y + 1})
+                Canvas.setValue(nodes, x, y + 1, colorToReplace)
+            end
+
+            if y - 1 >= 1 and not Canvas.getValue(nodes, x, y - 1) then
+                table.insert(toProcess, {["x"] = x, ["y"] = y - 1})
+                Canvas.setValue(nodes, x, y - 1, colorToReplace)
+            end
+        end
+
+        table.remove(toProcess, 1)
+    end
+
+    self:addNewHistory()
+
+    --set all cells to be filled to the currently selected color
+    for _, location in ipairs(cellsToFill) do
+        self:setCell(location.x, location.y, self.currentColor)
+    end
+end
+
+function Canvas:clear()
+    self:addNewHistory()
+
+    for x = 1, self.width do
+        for y = 1, self.height do
+            self:setCell(x, y, self.backgroundColor)
+        end
+    end
+end
+
+--[[
+    undo previous drawing actions
+]]
+function Canvas:undo()
+    if self.historyIndex >= #self.cellsHistory then
+        return
+    end
+
+    self.historyIndex = self.historyIndex + 1
+
+    for _, cell in ipairs(self.cellsHistory[self.historyIndex]) do
+        self.cells[cell.x][cell.y].backgroundColor = cell.backgroundColor
+    end
+end
+
+--[[
+    redo previous drawing actions
+]]
+function Canvas:redo()
+    if self.historyIndex <= 1 then
+        return
+    end
+
+    self.historyIndex = self.historyIndex - 1
+
+    for _, cell in ipairs(self.cellsHistory[self.historyIndex]) do
+        self.cells[cell.x][cell.y].backgroundColor = cell.backgroundColor
+    end
+end
+
+function Canvas.keyPressed(cnv, event, key, isHeld)
+    local keyName = keys.getName(key)
+    if ctrlHeld then
+        if keyName == "z" then
+            cnv:undo()
+        elseif keyName == "y" then
+            cnv:redo()
+        end
+    end
+end
+
+function Canvas.monitorTouch(cnv, event, side, x, y)
+    cnv.mouseClick(cnv, "mouse_click", 1, x, y)
+end
+
+function Canvas.mouseClick(cnv, event, button, x, y)
+    if button == 1 then
+        local lx = 1 + x - cnv.globalX
+        local ly = 1 + y - cnv.globalY
+
+        cnv:currentDrawAction(lx, ly)
     end
 end
 
@@ -730,6 +1000,41 @@ function Text:setTextColor(color)
 end
 
 --------------------------------
+--Button
+--------------------------------
+
+Button = Text:new {
+    onClickName = nil,
+    onClick = nil,
+}
+
+function Button:new(o) 
+    o = o or {}
+    o = Text:new(o)
+
+    setmetatable(o, self)
+    self.__index = self
+
+    if not o.buffer.display.isMonitor then
+        registerSelectionCallback("mouse_click", o, Button.mouseClick, o.onClickName)
+    else
+        registerSelectionCallback("monitor_touch", o, Button.monitorTouch, o.onClickName)
+    end
+end
+
+function Button.mouseClick(btn, event, button, x, y)
+    if btn.onClick and button == 1 then
+        btn:onClick()
+    end
+end
+
+function Button.monitorTouch(btn, event, side, x, y)
+    if btn.onClick then
+        btn:onClick()
+    end
+end
+
+--------------------------------
 --Textbox
 --------------------------------
 
@@ -759,6 +1064,7 @@ function Textbox:new(o)
         registerSelectionCallback("char", o, Textbox.characterTyped, "characterTyped")
         registerSelectionCallback("key", o, Textbox.keyPressed, "keyPressed")
         registerSelectionCallback("mouse_click", o, Textbox.mouseClicked, "mouseClicked")
+        registerSelectionCallback("monitor_touch", o, Textbox.monitorTouched, "monitorTouched")
 
         removeSelectionCallback("mouse_scroll", o, "textScroll")
         registerSelectionCallback("mouse_scroll", o, Textbox.textScroll, "textScroll")
@@ -768,7 +1074,7 @@ function Textbox:new(o)
 end
 
 --[[
-    scroll texbox canvas and update cursor position
+    scroll texbox element and update cursor position
 ]]
 function Textbox.textScroll(txb, event, scrollDir, x, y)
     if shiftHeld then
@@ -853,7 +1159,7 @@ function Textbox:drawCursor()
 end
 
 --[[
-    move the view canvas along with the cursor
+    move the view buffer along with the cursor
 ]]
 function Textbox:scrollCursorIntoBounds()
     local cursorX = self:getCursorPosX()
@@ -972,6 +1278,13 @@ function Textbox.keyPressed(txb, event, key, isHeld)
 end
 
 --[[
+    handle monitor touch events
+]]
+function Textbox.monitorTouched(txb, event, side, x, y)
+    Textbox.mouseClicked(txb, "mouse_click", 1, x, y)
+end
+
+--[[
     handle mouse clicks for textbox element
 ]]
 function Textbox.mouseClicked(txb, event, button, x, y)
@@ -984,12 +1297,17 @@ function Textbox.mouseClicked(txb, event, button, x, y)
 end
 
 --[[
-    set display and return canvas linked to it
+    set display and return buffer linked to it
 ]]
-function createCanvas(device, canvasName, backgroundColor, x, y, width, height)
+function createBuffer(device, bufferName, backgroundColor, x, y, width, height)
     local isMonitor
-    if device.__name and device.__name == "monitor" then
+    local side
+
+    local deviceMT = getmetatable(device)
+
+    if deviceMT and deviceMT.type == "monitor" then
         isMonitor = true
+        side = deviceMT.name
     else
         isMonitor = false
     end
@@ -1006,12 +1324,13 @@ function createCanvas(device, canvasName, backgroundColor, x, y, width, height)
     local display = Display:new {
         device = device,
         isMonitor = isMonitor,
+        side = side,
         width = width,
         height = height,
     }
 
-    local canvas = Canvas:new {
-        name = canvasName,
+    local buffer = Buffer:new {
+        name = bufferName,
         display = display,
         backgroundColor = backgroundColor,
         globalX = x,
@@ -1020,7 +1339,7 @@ function createCanvas(device, canvasName, backgroundColor, x, y, width, height)
         height = display.height,
     }
 
-    table.insert(canvases, canvas)
+    table.insert(buffers, buffer)
 
-    return canvas
+    return buffer
 end
