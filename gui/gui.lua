@@ -147,7 +147,7 @@ end
 function handleInputEvents()
     local event, data1, data2, data3 = os.pullEvent()
     if globalCallbacks[event] or selectionCallbacks[event] then
-        if event == "mouse_click" then
+        if event == "mouse_click" and data1 == 1 then
             for _, buffer in ipairs(buffers) do
                 selectedElement = handleMouseClick(buffer, data1, data2, data3)
                 if selectedElement then
@@ -239,20 +239,24 @@ function Buffer:new (o)
     setmetatable(o, self)
     self.__index = self
 
+    o:initializeCells()
+
+    return o
+end
+
+function Buffer:initializeCells()
     local cell
 
-    for x = 1, o.width do
-        for y = 1, o.height do
-            cell = Cell:new{backgroundColor = o.backgroundColor}
-            if not o.cells[x] then
-                table.insert(o.cells, x, {[y] = cell})
+    for x = 1, self.width do
+        for y = 1, self.height do
+            cell = Cell:new { backgroundColor = self.backgroundColor }
+            if not self.cells[x] then
+                table.insert(self.cells, x, {[y] = cell})
             else
-                table.insert(o.cells[x], y, cell)
+                table.insert(self.cells[x], y, cell)
             end
         end
     end
-
-    return o
 end
 
 --[[
@@ -341,6 +345,22 @@ function Element:new (o)
     end
 
     return o
+end
+
+function Element:setWidth(newWidth)
+    self.width = newWidth
+    
+    self.cells = {}
+
+    self:initializeCells()
+end
+
+function Element:setHeight(newHeight)
+    self.height = newHeight
+
+    self.cells = {}
+
+    self:initializeCells()
 end
 
 --[[
@@ -468,19 +488,56 @@ function Element:draw()
     --lx and ly are local x, y within an element
     for ly = 1, self.height do        
         for lx = 1, self.width do
-            local wy = ly + self.globalY - self.buffer.globalY
-            local wx = lx + self.globalX - self.buffer.globalX
+            local by = ly + self.globalY - self.buffer.globalY
+            local bx = lx + self.globalX - self.buffer.globalX
 
-            if self.cells[lx][ly].backgroundColor ~= 0 then
-                self.buffer.cells[wx][wy].character = self.cells[lx][ly].character
-                self.buffer.cells[wx][wy].textColor = self.cells[lx][ly].textColor
-                self.buffer.cells[wx][wy].backgroundColor = self.cells[lx][ly].backgroundColor
+            if self.cells[lx][ly].backgroundColor ~= 0 and bx >= 1 and bx <= self.buffer.width and by >= 1 and by <= self.buffer.height then
+                self.buffer.cells[bx][by].character = self.cells[lx][ly].character
+                self.buffer.cells[bx][by].textColor = self.cells[lx][ly].textColor
+                self.buffer.cells[bx][by].backgroundColor = self.cells[lx][ly].backgroundColor
             end
         end
     end
 
     for _, child in ipairs(self.children) do
         child:draw()
+    end
+end
+
+--------------------------------
+--Outline
+--------------------------------
+
+Outline = Element:new {
+
+}
+
+function Outline:new(o)
+    o = o or {}
+    o = Element:new(o)
+
+    setmetatable(o, self)
+    self.__index = self
+
+    return o
+end
+
+function Outline:initializeCells()
+    local cell
+
+    for x = 1, self.width do
+        for y = 1, self.height do
+            if x == 1 or x == self.width or y == 1 or y == self.height then
+                cell = Cell:new { backgroundColor = self.backgroundColor }
+            else
+                cell = Cell:new { backgroundColor = 0 }
+            end
+            if not self.cells[x] then
+                table.insert(self.cells, x, {[y] = cell})
+            else
+                table.insert(self.cells[x], y, cell)
+            end
+        end
     end
 end
 
@@ -495,7 +552,10 @@ Canvas = Element:new {
     cellsHistory = {},
     historyIndex = 1,
     currentDrawAction = nil,
-    -- selectionBox = nil,
+    selectionBox = nil,
+    copiedCells = nil,
+    copiedCellsWidth = 0,
+    copiedCellsHeght = 0,
 }
 
 function Canvas:new(o)
@@ -518,17 +578,19 @@ function Canvas:new(o)
         end
     end
 
-    -- o.selectionBox = Element:new {
-    --     name = o.name.."_selectionBox",
-    --     parent = o,
-    --     buffer = o.buffer,
-    --     visible = false,
-    -- }
+    o.selectionBox = Outline:new {
+        name = o.name.."_selectionBox",
+        parent = o,
+        buffer = o.buffer,
+        visible = false,
+    }
 
     o.currentDrawAction = Canvas.pen
 
     if not o.buffer.display.isMonitor then
         registerSelectionCallback("mouse_click", o, Canvas.mouseClick, "mouseClick")
+        registerSelectionCallback("mouse_drag", o, Canvas.mouseDrag, "mouseDrag")
+        registerSelectionCallback("mouse_up", o, Canvas.mouseUp, "mouseUp")
         registerSelectionCallback("key", o, Canvas.keyPressed, "keyPressed")
     else
         registerSelectionCallback("monitor_touch", o, Canvas.monitorTouch, "monitorTouch")
@@ -705,6 +767,67 @@ function Canvas:redo()
     end
 end
 
+--[[
+    copy selected region (indicated by selectionBox)
+]]
+function Canvas:copySelection()
+    if not self.selectionBox.visible then
+        return
+    end
+
+    self.copiedCells = {}
+
+    local lx, ly = self.selectionBox:getParentLocalPos()
+    lx = lx - 1
+    ly = ly - 1
+
+    local xBound = math.min(self.width, lx + self.selectionBox.width)
+    local yBound = math.min(self.height, ly + self.selectionBox.height)
+
+    self.copiedCellsWidth = 1 + xBound - lx
+    self.copiedCellsHeight = 1 + yBound - ly
+
+    local i, j
+
+    i = 1
+    for x = lx, xBound do
+        j = 1
+        for y = ly, yBound do
+            Canvas.setValue(self.copiedCells, i, j, self.cells[x][y].backgroundColor)
+            j = j + 1
+        end
+        i = i + 1
+    end
+end
+
+--[[
+    paste copiied selection to location of selectionBox x and y
+]]
+function Canvas:pasteSelection()
+    if #self.copiedCells == 0 then
+        return
+    end
+
+    local lx, ly = self.selectionBox:getParentLocalPos()
+    lx = lx - 1
+    ly = ly - 1
+
+    local xBound = math.min(self.width, lx + self.copiedCellsWidth)
+    local yBound = math.min(self.height, ly + self.copiedCellsHeight)
+
+    local i, j
+
+    i = 1
+    for x = lx, xBound do
+        j = 1
+        for y = ly, yBound do
+            self.cells[x][y].backgroundColor = Canvas.getValue(self.copiedCells, i, j)
+            j = j + 1
+        end
+        i = i + 1
+    end
+end
+
 function Canvas.keyPressed(cnv, event, key, isHeld)
     local keyName = keys.getName(key)
     if ctrlHeld then
@@ -712,7 +835,11 @@ function Canvas.keyPressed(cnv, event, key, isHeld)
             cnv:undo()
         elseif keyName == "y" then
             cnv:redo()
-        end
+        elseif keyName == "c" then
+            cnv:copySelection()
+        elseif keyName == "v" then
+            cnv:pasteSelection()
+        end 
     end
 end
 
@@ -726,6 +853,33 @@ function Canvas.mouseClick(cnv, event, button, x, y)
         local ly = 1 + y - cnv.globalY
 
         cnv:currentDrawAction(lx, ly)
+    elseif button == 2 then
+        cnv.selectionBox.visible = false
+        cnv.selectionBox:setGlobalPos(x, y)
+        cnv.selectionBox:setWidth(1)
+        cnv.selectionBox:setHeight(1)
+    end
+end
+
+function Canvas.mouseDrag(cnv, event, button, x, y)
+    if button == 1 then
+        Canvas.mouseClick(cnv, "mouse_click", 1, x, y)
+    elseif button == 2 then
+        cnv.selectionBox.visible = true
+
+        if x >= cnv.selectionBox.globalX then
+            cnv.selectionBox:setWidth(1 + x - cnv.selectionBox.globalX)
+        end
+
+        if y >= cnv.selectionBox.globalY then
+            cnv.selectionBox:setHeight(1 + y - cnv.selectionBox.globalY)
+        end
+    end
+end
+
+function Canvas.mouseUp(cnv, event, button, x, y)
+    if button == 2 then
+        
     end
 end
 
