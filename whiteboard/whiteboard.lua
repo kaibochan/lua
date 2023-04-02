@@ -5,8 +5,11 @@ local canvas
 
 local penButton
 local fillButton
+local clearButton
 local undoButton
 local redoButton
+local saveButton
+local loadButton
 
 --ordered colors table with both name and color value available
 local orderedColors = {
@@ -45,7 +48,7 @@ function initializeElements()
     }
 
     for index, color in ipairs(orderedColors) do
-        switchToColorButton = Button:new {
+        Button:new {
             name = color.name,
             parent = buffer,
             buffer = buffer,

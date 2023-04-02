@@ -31,12 +31,14 @@ local txb1 = Textbox:new {
     width = buffer1.width,
     height = buffer1.height,
     padding = 1,
-    text = paragraph1,
+    text = "",--paragraph1,
     backgroundColor = colors.red,
     textColor = colors.orange,
     horizontalAlignment = align.left,
     verticalAlignment = align.top,
     wrapText = false,
+    autoComplete = true,
+    allAutoCompleteChoices = {"Lorem", "Love", "Lollipop", "ipsum", "dolor", "sit", "amet"}
 }
 
 local txb2 = Textbox:new {

@@ -113,9 +113,7 @@ registerGlobalCallback("key_up", function(event, key)
 end, "releaseShiftControl")
 
 function handleMouseClick(buffer, button, x, y)
-    if button == 1 then
-        return getSelectedElement(buffer, x, y)
-    end
+    return getSelectedElement(buffer, x, y)
 end
 
 function handleMonitorTouch(buffer, side, x, y)
@@ -147,7 +145,7 @@ end
 function handleInputEvents()
     local event, data1, data2, data3 = os.pullEvent()
     if globalCallbacks[event] or selectionCallbacks[event] then
-        if event == "mouse_click" and data1 == 1 then
+        if event == "mouse_click" then
             for _, buffer in ipairs(buffers) do
                 selectedElement = handleMouseClick(buffer, data1, data2, data3)
                 if selectedElement then
@@ -592,6 +590,7 @@ function Canvas:new(o)
         registerSelectionCallback("mouse_drag", o, Canvas.mouseDrag, "mouseDrag")
         registerSelectionCallback("mouse_up", o, Canvas.mouseUp, "mouseUp")
         registerSelectionCallback("key", o, Canvas.keyPressed, "keyPressed")
+        registerSelectionCallback("paste", o, Canvas.paste, "paste")
     else
         registerSelectionCallback("monitor_touch", o, Canvas.monitorTouch, "monitorTouch")
     end
@@ -778,11 +777,11 @@ function Canvas:copySelection()
     self.copiedCells = {}
 
     local lx, ly = self.selectionBox:getParentLocalPos()
-    lx = lx - 1
-    ly = ly - 1
+    lx = lx
+    ly = ly
 
-    local xBound = math.min(self.width, lx + self.selectionBox.width)
-    local yBound = math.min(self.height, ly + self.selectionBox.height)
+    local xBound = math.min(self.width, lx + self.selectionBox.width - 1)
+    local yBound = math.min(self.height, ly + self.selectionBox.height - 1)
 
     self.copiedCellsWidth = 1 + xBound - lx
     self.copiedCellsHeight = 1 + yBound - ly
@@ -808,12 +807,14 @@ function Canvas:pasteSelection()
         return
     end
 
-    local lx, ly = self.selectionBox:getParentLocalPos()
-    lx = lx - 1
-    ly = ly - 1
+    self:addNewHistory()
 
-    local xBound = math.min(self.width, lx + self.copiedCellsWidth)
-    local yBound = math.min(self.height, ly + self.copiedCellsHeight)
+    local lx, ly = self.selectionBox:getParentLocalPos()
+    lx = lx
+    ly = ly
+
+    local xBound = math.min(self.width, lx + self.copiedCellsWidth - 1)
+    local yBound = math.min(self.height, ly + self.copiedCellsHeight - 1)
 
     local i, j
 
@@ -821,7 +822,7 @@ function Canvas:pasteSelection()
     for x = lx, xBound do
         j = 1
         for y = ly, yBound do
-            self.cells[x][y].backgroundColor = Canvas.getValue(self.copiedCells, i, j)
+            self:setCell(x, y, Canvas.getValue(self.copiedCells, i, j))
             j = j + 1
         end
         i = i + 1
@@ -837,9 +838,7 @@ function Canvas.keyPressed(cnv, event, key, isHeld)
             cnv:redo()
         elseif keyName == "c" then
             cnv:copySelection()
-        elseif keyName == "v" then
-            cnv:pasteSelection()
-        end 
+        end
     end
 end
 
@@ -881,6 +880,10 @@ function Canvas.mouseUp(cnv, event, button, x, y)
     if button == 2 then
         
     end
+end
+
+function Canvas.paste(cnv, event, paste)
+    cnv:pasteSelection()
 end
 
 --------------------------------
@@ -1119,6 +1122,8 @@ function Text:updateCells()
         if y > self.padding and y < self.height - self.padding + 1 then
             for x = 1, self.width do
                 if x > self.padding and x < self.width - self.padding + 1 then
+                    self.cells[x][y].backgroundColor = self.backgroundColor
+                    self.cells[x][y].textColor = self.textColor
                     self.cells[x][y].character = self.textRows[rowIndex][substringIndex]
                 end
 
@@ -1200,10 +1205,22 @@ Textbox = Text:new{
     cursorRowOffset = 0,
     cursorRowIndex = 1,
     enterSubmits = false,
+    selectionBackgroundColor = colors.gray,
+    selectionTextColor = colors.lightGray,
+    autoComplete = false,
+    textWithoutAutoComplete = "",
+    allAutoCompleteChoices = {},
+    currentAutoCompleteChoices = {},
+    currentChoiceIndex = nil,
+    autoCompletePos = 0,
 }
 
 function Textbox:new(o)
     o = o or {}
+    o.allAutoCompleteChoices = o.allAutoCompleteChoices or {}
+    o.currentAutoCompleteChoices = o.currentAutoCompleteChoices or {}
+    o.textWithoutAutoComplete = o.text
+
     o = Text:new(o)
 
     setmetatable(o, self)
@@ -1379,6 +1396,31 @@ function Textbox:setCursorPosXY(x, y)
 end
 
 --[[
+    override of setText function to support autocompletion
+]]
+function Textbox:setText(text)
+    self.text = text
+    self.textWithoutAutoComplete = text
+
+    self:updateTextRows()
+    self:horizontalScroll(0)
+    self:verticalScroll(0)
+    self:updateCells()
+end
+
+--[[
+    set the text without saving to textWithoutAutoComplete
+]]
+function Textbox:setTextWithAutoComplete(text)
+    self.text = text
+
+    self:updateTextRows()
+    self:horizontalScroll(0)
+    self:verticalScroll(0)
+    self:updateCells()
+end
+
+--[[
     insert character at cursor position and increment cursor position
 ]]
 function Textbox:insertCharacter(character)
@@ -1386,11 +1428,52 @@ function Textbox:insertCharacter(character)
     self:setCursorPos(self.cursorPos + 1)
 end
 
+function Textbox:findStartOfCurrentWord()
+    local spaceIndex
+    local nextSpaceIndex = self.textWithoutAutoComplete:find(" ")
+
+    while nextSpaceIndex and nextSpaceIndex <= self.cursorPos do
+        spaceIndex = nextSpaceIndex
+        nextSpaceIndex = self.textWithoutAutoComplete:find(" ", spaceIndex + 1)
+    end
+
+    if not spaceIndex then
+        return 1
+    end
+
+    return spaceIndex + 1
+end
+
 --[[
     insert characters as they are received at cursor position while incrementing cursor position
 ]]
 function Textbox.characterTyped(txb, event, character)
+    if txb.autoComplete then
+        txb:setText(txb.textWithoutAutoComplete)
+    end
+
     txb:insertCharacter(character)
+    
+    local characterAfterCursor = txb.text:sub(txb.cursorPos + 1, txb.cursorPos + 1)
+    if txb.autoComplete
+    and (characterAfterCursor == "" or characterAfterCursor == " " or characterAfterCursor == "\n" or characterAfterCursor == "\t") then
+        txb.autoCompletePos = txb.cursorPos
+        local wordIndex = txb:findStartOfCurrentWord()
+        txb.currentAutoCompleteChoices = {}
+
+        for _, autoCompleteChoice in ipairs(txb.allAutoCompleteChoices) do
+            if txb.textWithoutAutoComplete:sub(wordIndex, txb.cursorPos) == autoCompleteChoice:sub(1, 1 + txb.cursorPos - wordIndex) then
+                table.insert(txb.currentAutoCompleteChoices, autoCompleteChoice:sub(txb.cursorPos - wordIndex + 2))
+            end
+        end
+
+        txb.currentChoiceIndex = 1
+        if #txb.currentAutoCompleteChoices ~= 0 then
+            txb:setTextWithAutoComplete(txb.textWithoutAutoComplete:sub(0, txb.cursorPos)
+            ..txb.currentAutoCompleteChoices[txb.currentChoiceIndex]
+            ..txb.textWithoutAutoComplete:sub(txb.cursorPos + 1))
+        end
+    end
 end
 
 --[[
@@ -1399,29 +1482,61 @@ end
 function Textbox.keyPressed(txb, event, key, isHeld)
     local keyName = keys.getName(key)
 
+    local characterAfterCursor = txb.textWithoutAutoComplete:sub(txb.cursorPos + 1, txb.cursorPos + 1)
+
     if keyName == "left" and txb.cursorPos > 0 then
         txb:setCursorPos(txb.cursorPos - 1)
     elseif keyName == "right" and txb.cursorPos <= #txb.text then
-        txb:setCursorPos(txb.cursorPos + 1)
+        if txb.autoComplete and #txb.currentAutoCompleteChoices ~= 0 then
+            txb:setText(txb.textWithoutAutoComplete:sub(0, txb.cursorPos)
+            ..txb.currentAutoCompleteChoices[txb.currentChoiceIndex]
+            ..txb.textWithoutAutoComplete:sub(txb.cursorPos + 1))
+
+            txb:setCursorPos(txb.cursorPos + #txb.currentAutoCompleteChoices[txb.currentChoiceIndex])
+            txb.currentAutoCompleteChoices = {}
+        else
+            txb:setCursorPos(txb.cursorPos + 1)
+        end
     elseif keyName == "up" then
-        local cursorX = txb:getCursorPosX()
-        local cursorY = txb:getCursorPosY()
-
-        txb:setCursorPosXY(cursorX, cursorY - 1)
+        if txb.autoComplete and #txb.currentAutoCompleteChoices ~= 0 then
+            txb.currentChoiceIndex = (txb.currentChoiceIndex + #txb.currentAutoCompleteChoices) % #txb.currentAutoCompleteChoices + 1
+            txb:setTextWithAutoComplete(txb.textWithoutAutoComplete:sub(0, txb.cursorPos)
+            ..txb.currentAutoCompleteChoices[txb.currentChoiceIndex]
+            ..txb.textWithoutAutoComplete:sub(txb.cursorPos + 1))
+        else
+            local cursorX = txb:getCursorPosX()
+            local cursorY = txb:getCursorPosY()
+            txb:setCursorPosXY(cursorX, cursorY - 1)
+        end
     elseif keyName == "down" then
-        local cursorX = txb:getCursorPosX()
-        local cursorY = txb:getCursorPosY()
-
-        txb:setCursorPosXY(cursorX, cursorY + 1)
+        if txb.autoComplete and #txb.currentAutoCompleteChoices ~= 0 then
+            txb.currentChoiceIndex = (txb.currentChoiceIndex + 1) % #txb.currentAutoCompleteChoices + 1
+            txb:setTextWithAutoComplete(txb.textWithoutAutoComplete:sub(0, txb.cursorPos)
+            ..txb.currentAutoCompleteChoices[txb.currentChoiceIndex]
+            ..txb.textWithoutAutoComplete:sub(txb.cursorPos + 1))
+        else
+            local cursorX = txb:getCursorPosX()
+            local cursorY = txb:getCursorPosY()
+            txb:setCursorPosXY(cursorX, cursorY + 1)
+        end
     elseif keyName == "enter" and not txb.enterSubmits then
         txb:eraseCursor()
+        if txb.autoComplete then
+            txb:setText(txb.textWithoutAutoComplete)
+        end
         txb:insertCharacter("\n")
     elseif keyName == "backspace" and txb.cursorPos > 0 then
         txb:eraseCursor()
+        if txb.autoComplete then
+            txb:setText(txb.textWithoutAutoComplete)
+        end
         txb:setText(txb.text:sub(0, txb.cursorPos - 1)..txb.text:sub(txb.cursorPos + 1))
         txb:setCursorPos(txb.cursorPos - 1)
     elseif keyName == "delete" and txb.cursorPos < #txb.text then
         txb:eraseCursor()
+        if txb.autoComplete then
+            txb:setText(txb.textWithoutAutoComplete)
+        end
         txb:setText(txb.text:sub(0, txb.cursorPos)..txb.text:sub(txb.cursorPos + 2))
         txb:setCursorPos(txb.cursorPos)
     elseif keyName == "home" then
