@@ -418,8 +418,8 @@ end
     gets displacement of point x, y relative to global coordinates
 ]]
 function Element:getLocalPos(x, y)
-    local lx = x - self.globalX
-    local ly = y - self.globalY
+    local lx = 1 + x - self.globalX
+    local ly = 1 + y - self.globalY
 
     return lx, ly
 end
@@ -1122,8 +1122,6 @@ function Text:updateCells()
         if y > self.padding and y < self.height - self.padding + 1 then
             for x = 1, self.width do
                 if x > self.padding and x < self.width - self.padding + 1 then
-                    self.cells[x][y].backgroundColor = self.backgroundColor
-                    self.cells[x][y].textColor = self.textColor
                     self.cells[x][y].character = self.textRows[rowIndex][substringIndex]
                 end
 
@@ -1205,10 +1203,14 @@ Textbox = Text:new{
     cursorRowOffset = 0,
     cursorRowIndex = 1,
     enterSubmits = false,
+
+    selecting = false,
+    selectionStartIndex = nil,
+    selectionEndIndex = nil,
     selectionBackgroundColor = colors.gray,
     selectionTextColor = colors.lightGray,
+
     autoComplete = false,
-    textWithoutAutoComplete = "",
     allAutoCompleteChoices = {},
     currentAutoCompleteChoices = {},
     currentChoiceIndex = nil,
@@ -1235,6 +1237,8 @@ function Textbox:new(o)
         registerSelectionCallback("char", o, Textbox.characterTyped, "characterTyped")
         registerSelectionCallback("key", o, Textbox.keyPressed, "keyPressed")
         registerSelectionCallback("mouse_click", o, Textbox.mouseClicked, "mouseClicked")
+        registerSelectionCallback("mouse_drag", o, Textbox.mouseDragged, "mouseDragged")
+
         registerSelectionCallback("monitor_touch", o, Textbox.monitorTouched, "monitorTouched")
 
         removeSelectionCallback("mouse_scroll", o, "textScroll")
@@ -1248,15 +1252,15 @@ end
     scroll texbox element and update cursor position
 ]]
 function Textbox.textScroll(txb, event, scrollDir, x, y)
+    txb:eraseSelection()
+    txb:eraseCursor()
     if shiftHeld then
-        txb:eraseCursor()
         txb:horizontalScroll(scrollDir)
-        txb:drawCursor()
     else
-        txb:eraseCursor()
         txb:verticalScroll(scrollDir)
-        txb:drawCursor()
     end
+    txb:drawSelection()
+    txb:drawCursor()
 end
 
 --[[
@@ -1276,18 +1280,30 @@ end
 --[[
     compute cursorRowIndex and cursorRowOffset based on cursor position
 ]]
-function Textbox:computeRowIndexAndOffset()
+function Textbox:computeRowIndexAndOffset(textPosition)
     local stringIndex = 0
+    local rowIndex = 1
+    local rowOffset = 0
+
+    local foundCursorPos = false
 
     for index, textData in ipairs(self.textRows) do
-        if stringIndex + #textData.text >= self.cursorPos then
-            self.cursorRowIndex = index
-            self.cursorRowOffset = self.cursorPos - stringIndex
+        if stringIndex + #textData.text >= textPosition then
+            rowIndex = index
+            rowOffset = textPosition - stringIndex
+            foundCursorPos = true
             break
         else
             stringIndex = stringIndex + #textData.text + textData.newLineTerm
         end
     end
+
+    if not foundCursorPos then
+        rowIndex = #self.textRows + 1
+        rowOffset = 0
+    end
+
+    return rowIndex, rowOffset
 end
 
 --[[
@@ -1330,6 +1346,80 @@ function Textbox:drawCursor()
 end
 
 --[[
+    erase selection highlighting
+]]
+function Textbox:eraseSelection()
+    if not self.selecting then
+        return
+    end
+
+    local minSelection = math.min(self.selectionStartIndex, self.selectionEndIndex)
+    local maxSelection = math.max(self.selectionStartIndex, self.selectionEndIndex)
+
+    local selectionStartRow, selectionStartOffset = self:computeRowIndexAndOffset(minSelection)
+    local selectionEndRow, selectionEndOffset = self:computeRowIndexAndOffset(maxSelection)
+
+    local rowIndex = self:getStartRowIndex()
+    local substringIndex
+
+    for y = 1, self.height do
+        substringIndex = self:getStartSubstringIndex(rowIndex)
+
+        for x = 1, self.width do
+            if selectionStartRow == selectionEndRow and rowIndex == selectionStartRow and substringIndex > selectionStartOffset and substringIndex <= selectionEndOffset
+            or selectionStartRow ~= selectionEndRow
+            and (rowIndex == selectionStartRow and substringIndex > selectionStartOffset and substringIndex <= #self.textRows[rowIndex].text
+            or rowIndex == selectionEndRow and substringIndex > 0 and substringIndex <= selectionEndOffset
+            or rowIndex > selectionStartRow and rowIndex < selectionEndRow and substringIndex > 0 and substringIndex <= #self.textRows[rowIndex].text) then
+                self.cells[x][y].backgroundColor = self.backgroundColor
+                self.cells[x][y].textColor = self.textColor
+            end
+
+            substringIndex = substringIndex + 1
+        end
+
+        rowIndex = rowIndex + 1
+    end
+end
+
+--[[
+    draw highlighted selection
+]]
+function Textbox:drawSelection()
+    if not self.selecting then
+        return
+    end
+
+    local minSelection = math.min(self.selectionStartIndex, self.selectionEndIndex)
+    local maxSelection = math.max(self.selectionStartIndex, self.selectionEndIndex)
+
+    local selectionStartRow, selectionStartOffset = self:computeRowIndexAndOffset(minSelection)
+    local selectionEndRow, selectionEndOffset = self:computeRowIndexAndOffset(maxSelection)
+
+    local rowIndex = self:getStartRowIndex()
+    local substringIndex
+
+    for y = 1, self.height do
+        substringIndex = self:getStartSubstringIndex(rowIndex)
+
+        for x = 1, self.width do
+            if selectionStartRow == selectionEndRow and rowIndex == selectionStartRow and substringIndex > selectionStartOffset and substringIndex <= selectionEndOffset
+            or selectionStartRow ~= selectionEndRow
+            and (rowIndex == selectionStartRow and substringIndex > selectionStartOffset and substringIndex <= #self.textRows[rowIndex].text
+            or rowIndex == selectionEndRow and substringIndex > 0 and substringIndex <= selectionEndOffset
+            or rowIndex > selectionStartRow and rowIndex < selectionEndRow and substringIndex > 0 and substringIndex <= #self.textRows[rowIndex].text) then
+                self.cells[x][y].backgroundColor = self.selectionBackgroundColor
+                self.cells[x][y].textColor = self.selectionTextColor
+            end
+
+            substringIndex = substringIndex + 1
+        end
+
+        rowIndex = rowIndex + 1
+    end
+end
+
+--[[
     move the view buffer along with the cursor
 ]]
 function Textbox:scrollCursorIntoBounds()
@@ -1359,17 +1449,20 @@ end
 ]]
 function Textbox:setCursorPos(newCursorPos)
     if newCursorPos < 0 or newCursorPos > #self.text then
+        self:drawSelection()
         self:drawCursor()
         return
     end
 
+    self:eraseSelection()
     self:eraseCursor()    
 
     self.cursorPos = newCursorPos
-    self:computeRowIndexAndOffset()
+    self.cursorRowIndex, self.cursorRowOffset = self:computeRowIndexAndOffset(self.cursorPos)
 
     self:scrollCursorIntoBounds()
 
+    self:drawSelection()
     self:drawCursor()
 end
 
@@ -1377,53 +1470,32 @@ end
     set cursor position based on an x and y input
 ]]
 function Textbox:setCursorPosXY(x, y)
+    self:eraseSelection()
     self:eraseCursor()
 
-    self.cursorRowIndex = math.min(#self.textRows, math.max(1, y - 1 + self:getStartRowIndex()))
+    self.cursorRowIndex = math.min(#self.textRows + self.textRows[#self.textRows].newLineTerm, math.max(1, y - 1 + self:getStartRowIndex()))
     self.cursorRowOffset = math.min(#self.textRows[self.cursorRowIndex].text, math.max(0, x - 2 + self:getStartSubstringIndex(self.cursorRowIndex)))
-
-    if self.cursorRowOffset == #self.textRows[self.cursorRowIndex].text + self.textRows[self.cursorRowIndex].newLineTerm
-    and self.cursorRowIndex < #self.textRows then
-
-        self.cursorRowIndex = self.cursorRowIndex + 1
-        self.cursorRowOffset = 0
-    end
 
     self:computeCursorPos()
     self:scrollCursorIntoBounds()
 
+    self:drawSelection()
     self:drawCursor()
-end
-
---[[
-    override of setText function to support autocompletion
-]]
-function Textbox:setText(text)
-    self.text = text
-    self.textWithoutAutoComplete = text
-
-    self:updateTextRows()
-    self:horizontalScroll(0)
-    self:verticalScroll(0)
-    self:updateCells()
-end
-
---[[
-    set the text without saving to textWithoutAutoComplete
-]]
-function Textbox:setTextWithAutoComplete(text)
-    self.text = text
-
-    self:updateTextRows()
-    self:horizontalScroll(0)
-    self:verticalScroll(0)
-    self:updateCells()
 end
 
 --[[
     insert character at cursor position and increment cursor position
 ]]
 function Textbox:insertCharacter(character)
+    if self.selecting then
+        local minSelection = math.min(self.selectionStartIndex, self.selectionEndIndex)
+        local maxSelection = math.max(self.selectionStartIndex, self.selectionEndIndex)
+
+        self:setCursorPos(minSelection)
+        self:eraseSelection()
+        self:setText(self.text:sub(0, minSelection)..self.text:sub(maxSelection + 1))
+        self:stopSelecting()
+    end
     self:setText(self.text:sub(0, self.cursorPos)..character..self.text:sub(self.cursorPos + 1))
     self:setCursorPos(self.cursorPos + 1)
 end
@@ -1445,35 +1517,35 @@ function Textbox:findStartOfCurrentWord()
 end
 
 --[[
+    reset selection variables
+]]
+function Textbox:stopSelecting()
+    self.selecting = false
+    self.selectionStartIndex = nil
+    self.selectionEndIndex = nil
+end
+
+--[[
+    sets the beginning of the selection area
+]]
+function Textbox:setSelectionStart(textIndex)
+    self:eraseSelection()
+    self:stopSelecting()
+    self.selectionStartIndex = textIndex
+end
+
+function Textbox:setSelectionEnd(textIndex)
+    self:eraseSelection()
+    self.selectionEndIndex = textIndex
+    self.selecting = true
+    self:drawSelection()
+end
+
+--[[
     insert characters as they are received at cursor position while incrementing cursor position
 ]]
 function Textbox.characterTyped(txb, event, character)
-    if txb.autoComplete then
-        txb:setText(txb.textWithoutAutoComplete)
-    end
-
     txb:insertCharacter(character)
-    
-    local characterAfterCursor = txb.text:sub(txb.cursorPos + 1, txb.cursorPos + 1)
-    if txb.autoComplete
-    and (characterAfterCursor == "" or characterAfterCursor == " " or characterAfterCursor == "\n" or characterAfterCursor == "\t") then
-        txb.autoCompletePos = txb.cursorPos
-        local wordIndex = txb:findStartOfCurrentWord()
-        txb.currentAutoCompleteChoices = {}
-
-        for _, autoCompleteChoice in ipairs(txb.allAutoCompleteChoices) do
-            if txb.textWithoutAutoComplete:sub(wordIndex, txb.cursorPos) == autoCompleteChoice:sub(1, 1 + txb.cursorPos - wordIndex) then
-                table.insert(txb.currentAutoCompleteChoices, autoCompleteChoice:sub(txb.cursorPos - wordIndex + 2))
-            end
-        end
-
-        txb.currentChoiceIndex = 1
-        if #txb.currentAutoCompleteChoices ~= 0 then
-            txb:setTextWithAutoComplete(txb.textWithoutAutoComplete:sub(0, txb.cursorPos)
-            ..txb.currentAutoCompleteChoices[txb.currentChoiceIndex]
-            ..txb.textWithoutAutoComplete:sub(txb.cursorPos + 1))
-        end
-    end
 end
 
 --[[
@@ -1482,67 +1554,145 @@ end
 function Textbox.keyPressed(txb, event, key, isHeld)
     local keyName = keys.getName(key)
 
-    local characterAfterCursor = txb.textWithoutAutoComplete:sub(txb.cursorPos + 1, txb.cursorPos + 1)
+    local minSelection, maxSelection
+    if txb.selecting then
+        minSelection = math.min(txb.selectionStartIndex, txb.selectionEndIndex)
+        maxSelection = math.max(txb.selectionStartIndex, txb.selectionEndIndex)
+    end
 
-    if keyName == "left" and txb.cursorPos > 0 then
-        txb:setCursorPos(txb.cursorPos - 1)
+    if ctrlHeld and keyName == "a" then
+        txb:setSelectionStart(0)
+        txb:setCursorPos(#txb.text - 1)
+        txb:setSelectionEnd(txb.cursorPos)
+        txb:drawCursor()
+    elseif keyName == "left" and txb.cursorPos > 0 then
+        if shiftHeld then
+            if not txb.selecting then
+                txb:setSelectionStart(txb.cursorPos)
+            end
+            txb:setCursorPos(txb.cursorPos - 1)
+            txb:setSelectionEnd(txb.cursorPos)
+            txb:drawCursor()
+        elseif txb.selecting then
+            txb:setCursorPos(minSelection)
+            txb:eraseSelection()
+            txb:stopSelecting()
+            txb:drawCursor()
+        else
+            txb:setCursorPos(txb.cursorPos - 1)
+        end
     elseif keyName == "right" and txb.cursorPos <= #txb.text then
-        if txb.autoComplete and #txb.currentAutoCompleteChoices ~= 0 then
-            txb:setText(txb.textWithoutAutoComplete:sub(0, txb.cursorPos)
-            ..txb.currentAutoCompleteChoices[txb.currentChoiceIndex]
-            ..txb.textWithoutAutoComplete:sub(txb.cursorPos + 1))
-
-            txb:setCursorPos(txb.cursorPos + #txb.currentAutoCompleteChoices[txb.currentChoiceIndex])
-            txb.currentAutoCompleteChoices = {}
+        if shiftHeld then
+            if not txb.selecting then
+                txb:setSelectionStart(txb.cursorPos)
+            end
+            txb:setCursorPos(txb.cursorPos + 1)
+            txb:setSelectionEnd(txb.cursorPos)
+            txb:drawCursor()
+        elseif txb.selecting then
+            txb:setCursorPos(maxSelection)
+            txb:eraseSelection()
+            txb:stopSelecting()
+            txb:drawCursor()
         else
             txb:setCursorPos(txb.cursorPos + 1)
         end
     elseif keyName == "up" then
-        if txb.autoComplete and #txb.currentAutoCompleteChoices ~= 0 then
-            txb.currentChoiceIndex = (txb.currentChoiceIndex + #txb.currentAutoCompleteChoices) % #txb.currentAutoCompleteChoices + 1
-            txb:setTextWithAutoComplete(txb.textWithoutAutoComplete:sub(0, txb.cursorPos)
-            ..txb.currentAutoCompleteChoices[txb.currentChoiceIndex]
-            ..txb.textWithoutAutoComplete:sub(txb.cursorPos + 1))
+        local cursorX = txb:getCursorPosX()
+        local cursorY = txb:getCursorPosY()
+
+        if shiftHeld then
+            if not txb.selecting then
+                txb:setSelectionStart(txb.cursorPos)
+            end
+            txb:setCursorPosXY(cursorX, cursorY - 1)
+            txb:setSelectionEnd(txb.cursorPos)
+            txb:drawCursor()
+        elseif txb.selecting then
+            txb:setCursorPos(minSelection)
+            cursorX = txb:getCursorPosX()
+            cursorY = txb:getCursorPosY()
+            txb:setCursorPosXY(cursorX, cursorY - 1)
+            txb:eraseSelection()
+            txb:stopSelecting()
+            txb:drawCursor()
         else
-            local cursorX = txb:getCursorPosX()
-            local cursorY = txb:getCursorPosY()
             txb:setCursorPosXY(cursorX, cursorY - 1)
         end
     elseif keyName == "down" then
-        if txb.autoComplete and #txb.currentAutoCompleteChoices ~= 0 then
-            txb.currentChoiceIndex = (txb.currentChoiceIndex + 1) % #txb.currentAutoCompleteChoices + 1
-            txb:setTextWithAutoComplete(txb.textWithoutAutoComplete:sub(0, txb.cursorPos)
-            ..txb.currentAutoCompleteChoices[txb.currentChoiceIndex]
-            ..txb.textWithoutAutoComplete:sub(txb.cursorPos + 1))
+        local cursorX = txb:getCursorPosX()
+        local cursorY = txb:getCursorPosY()
+
+        if shiftHeld then
+            if not txb.selecting then
+                txb:setSelectionStart(txb.cursorPos)
+            end
+            txb:setCursorPosXY(cursorX, cursorY + 1)
+            txb:setSelectionEnd(txb.cursorPos)
+            txb:drawCursor()
+        elseif txb.selecting then
+            txb:setCursorPos(maxSelection)
+            cursorX = txb:getCursorPosX()
+            cursorY = txb:getCursorPosY()
+            txb:setCursorPosXY(cursorX, cursorY + 1)
+            txb:eraseSelection()
+            txb:stopSelecting()
+            txb:drawCursor()
         else
-            local cursorX = txb:getCursorPosX()
-            local cursorY = txb:getCursorPosY()
             txb:setCursorPosXY(cursorX, cursorY + 1)
         end
     elseif keyName == "enter" and not txb.enterSubmits then
+        txb:eraseSelection()
         txb:eraseCursor()
-        if txb.autoComplete then
-            txb:setText(txb.textWithoutAutoComplete)
-        end
         txb:insertCharacter("\n")
-    elseif keyName == "backspace" and txb.cursorPos > 0 then
-        txb:eraseCursor()
-        if txb.autoComplete then
-            txb:setText(txb.textWithoutAutoComplete)
+    elseif keyName == "backspace" then
+        if txb.selecting then
+            txb:setCursorPos(minSelection)
+            txb:eraseSelection()
+            txb:setText(txb.text:sub(0, minSelection)..txb.text:sub(maxSelection + 1))
+            txb:stopSelecting()
+            txb:drawCursor()
+        elseif txb.cursorPos > 0 then
+            txb:eraseSelection()
+            txb:eraseCursor()
+            txb:setText(txb.text:sub(0, txb.cursorPos - 1)..txb.text:sub(txb.cursorPos + 1))
+            txb:setCursorPos(txb.cursorPos - 1)
         end
-        txb:setText(txb.text:sub(0, txb.cursorPos - 1)..txb.text:sub(txb.cursorPos + 1))
-        txb:setCursorPos(txb.cursorPos - 1)
-    elseif keyName == "delete" and txb.cursorPos < #txb.text then
-        txb:eraseCursor()
-        if txb.autoComplete then
-            txb:setText(txb.textWithoutAutoComplete)
+    elseif keyName == "delete" then
+        if txb.selecting then
+            txb:setCursorPos(minSelection)
+            txb:eraseSelection()
+            txb:setText(txb.text:sub(0, minSelection)..txb.text:sub(maxSelection + 1))
+            txb:stopSelecting()
+            txb:drawCursor()
+        elseif txb.cursorPos < #txb.text then
+            txb:eraseSelection()
+            txb:eraseCursor()
+            txb:setText(txb.text:sub(0, txb.cursorPos)..txb.text:sub(txb.cursorPos + 2))
+            txb:setCursorPos(txb.cursorPos)
         end
-        txb:setText(txb.text:sub(0, txb.cursorPos)..txb.text:sub(txb.cursorPos + 2))
-        txb:setCursorPos(txb.cursorPos)
     elseif keyName == "home" then
-        txb:setCursorPos(txb.cursorPos - txb.cursorRowOffset)
+        if shiftHeld then
+            if not txb.selecting then
+                txb:setSelectionStart(txb.cursorPos)
+            end
+            txb:setCursorPos(txb.cursorPos - txb.cursorRowOffset)
+            txb:setSelectionEnd(txb.cursorPos)
+            txb:drawCursor()
+        else
+            txb:setCursorPos(txb.cursorPos - txb.cursorRowOffset)
+        end
     elseif keyName == "end" then
-        txb:setCursorPos(txb.cursorPos - txb.cursorRowOffset + #txb.textRows[txb.cursorRowIndex].text)
+        if shiftHeld then
+            if not txb.selecting then
+                txb:setSelectionStart(txb.cursorPos)
+            end
+            txb:setCursorPos(txb.cursorPos - txb.cursorRowOffset + #txb.textRows[txb.cursorRowIndex].text)
+            txb:setSelectionEnd(txb.cursorPos)
+            txb:drawCursor()
+        else
+            txb:setCursorPos(txb.cursorPos - txb.cursorRowOffset + #txb.textRows[txb.cursorRowIndex].text)
+        end
     end
 end
 
@@ -1558,10 +1708,24 @@ end
 ]]
 function Textbox.mouseClicked(txb, event, button, x, y)
     if button == 1 then
-        local lx = 1 + x - txb.globalX
-        local ly = 1 + y - txb.globalY
+        local lx, ly = txb:getLocalPos(x, y)
 
         txb:setCursorPosXY(lx, ly)
+        txb:setSelectionStart(txb.cursorPos)
+        txb:drawCursor()
+    end
+end
+
+--[[
+    handle mouse drag events for textbox element
+]]
+function Textbox.mouseDragged(txb, event, button, x, y)
+    if button == 1 then
+        local lx, ly = txb:getLocalPos(x, y)
+
+        txb:setCursorPosXY(lx, ly)
+        txb:setSelectionEnd(txb.cursorPos)
+        txb:drawCursor()
     end
 end
 
