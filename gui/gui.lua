@@ -612,6 +612,9 @@ function Canvas:setCell(x, y, color)
     table.insert(self.cellsHistory[self.historyIndex], {["x"] = x, ["y"] = y, ["backgroundColor"] = self.cells[x][y].backgroundColor})
 end
 
+--[[
+    add new undo history to the history table
+]]
 function Canvas:addNewHistory()
     table.insert(self.cellsHistory, self.historyIndex, {})
     if #self.cellsHistory > self.maxUndo then
@@ -1195,6 +1198,22 @@ end
 --Textbox
 --------------------------------
 
+TextEdit = {
+    index = 0,
+    string = "",
+    replacement = "",
+    previousCursorPos = 0,
+}
+
+function TextEdit:new(o)
+    o = o or {}
+
+    setmetatable(o, self)
+    self.__index = self
+
+    return o
+end
+
 Textbox = Text:new{
     class = "Textbox",
     cursorPos = 0,
@@ -1210,23 +1229,32 @@ Textbox = Text:new{
     selectionBackgroundColor = colors.gray,
     selectionTextColor = colors.lightGray,
 
-    autoComplete = false,
+    maxUndo = 500,
+    historyIndex = 0,
+    changeHistory = {},
+    
+    autoCompleteEnable = false,
+    autoCompleting = false,
     allAutoCompleteChoices = {},
     currentAutoCompleteChoices = {},
-    currentChoiceIndex = nil,
+    currentChoiceIndex = 1,
     autoCompletePos = 0,
 }
 
 function Textbox:new(o)
     o = o or {}
+
+    o.changeHistory = {}
+
     o.allAutoCompleteChoices = o.allAutoCompleteChoices or {}
-    o.currentAutoCompleteChoices = o.currentAutoCompleteChoices or {}
-    o.textWithoutAutoComplete = o.text
+    o.currentAutoCompleteChoices = {}
 
     o = Text:new(o)
 
     setmetatable(o, self)
     self.__index = self
+
+    o:addNewHistory()
 
     --o:setHorizontalAlignment(o.horizontalAlignment)
     --o:setVerticalAlignment(o.verticalAlignment)
@@ -1484,29 +1512,148 @@ function Textbox:setCursorPosXY(x, y)
 end
 
 --[[
-    insert character at cursor position and increment cursor position
+    add new undo history to the history table
 ]]
-function Textbox:insertCharacter(character)
+function Textbox:addNewHistory()
+    table.insert(self.changeHistory, self.historyIndex, {})
+    if #self.changeHistory > self.maxUndo then
+        table.remove(self.changeHistory, self.maxUndo + 1)
+    end
+
+    for i = 1, self.historyIndex - 1 do
+        table.remove(self.changeHistory, 1)
+    end
+
+    self.historyIndex = 1
+end
+
+--[[
+    undo previous text editing actions
+]]
+function Textbox:undo()
+    if self.historyIndex >= #self.changeHistory then
+        return
+    end
+
+    if self.selecting then
+        self:eraseSelection()
+        self:stopSelecting()
+    end
+
+    local change = self.changeHistory[self.historyIndex]
+    self:setText(self.text:sub(0, change.index - 1)..change.string..self.text:sub(change.index + #change.replacement))
+    self:setCursorPos(change.previousCursorPos)
+
+    self.historyIndex = self.historyIndex + 1
+end
+
+--[[
+    redo previous text editing actions
+]]
+function Textbox:redo()
+    if self.historyIndex <= 1 then
+        return
+    end
+
+    if self.selecting then
+        self:eraseSelection()
+        self:stopSelecting()
+    end
+
+    self.historyIndex = self.historyIndex - 1
+
+    local change = self.changeHistory[self.historyIndex]
+    self:setText(self.text:sub(0, change.index - 1)..change.replacement..self.text:sub(change.index + #change.string))
+    self:setCursorPos(change.nextCursorPos)
+end
+
+function Textbox:getAutoCompletionChoices()
+    local wordIndex = self:findStartOfCurrentWord()
+    local startOfWord = self.text:sub(wordIndex, self.cursorPos)
+    local indexInWord = 1 + self.cursorPos - wordIndex
+
+    self.currentAutoCompleteChoices = {}
+    for _, word in ipairs(self.allAutoCompleteChoices) do
+        if word:sub(1, indexInWord) == startOfWord and word:sub(indexInWord + 1) ~= "" then
+            table.insert(self.currentAutoCompleteChoices, word:sub(indexInWord + 1))
+        end
+    end
+
+    self.currentChoiceIndex = 1
+    self.autoCompleting = (#self.currentAutoCompleteChoices ~= 0)
+end
+
+function Textbox:showAutoCompletionChoice()
+    if self.autoCompleting then
+        local currentChoice = self.currentAutoCompleteChoices[self.currentChoiceIndex]
+        self:setSelectionStart(self.cursorPos)
+        
+        self:setText(self.text:sub(0, self.cursorPos)..currentChoice..self.text:sub(self.cursorPos + 1))
+        self:setSelectionEnd(self.selectionStartIndex + #currentChoice)
+    end
+end
+
+function Textbox:eraseAutoCompletionChoice()
+    if self.autoCompleting then
+        self:eraseSelection()
+        self:stopSelecting()
+        self:setText(self.text:sub(0, self.cursorPos)..self.text:sub(1 + self.cursorPos + #self.currentAutoCompleteChoices[self.currentChoiceIndex]))
+    end
+end
+
+--[[
+    insert string at cursor position and increment cursor position
+]]
+function Textbox:insert(string)
+    self:addNewHistory()
     if self.selecting then
         local minSelection = math.min(self.selectionStartIndex, self.selectionEndIndex)
         local maxSelection = math.max(self.selectionStartIndex, self.selectionEndIndex)
+        
+        if not self.autoCompleting then
+            self.changeHistory[self.historyIndex] = TextEdit:new {
+                index = minSelection + 1,
+                string = self.text:sub(minSelection + 1, maxSelection),
+                replacement = string,
+                previousCursorPos = self.cursorPos,
+                nextCursorPos = minSelection + #string,
+            }
+        else
+            self.changeHistory[self.historyIndex] = TextEdit:new {
+                index = self.cursorPos + 1,
+                replacement = string,
+                previousCursorPos = self.cursorPos,
+                nextCursorPos = self.cursorPos + #string
+            }
+        end
 
         self:setCursorPos(minSelection)
         self:eraseSelection()
         self:setText(self.text:sub(0, minSelection)..self.text:sub(maxSelection + 1))
         self:stopSelecting()
+    else
+        self.changeHistory[self.historyIndex] = TextEdit:new {
+            index = self.cursorPos + 1,
+            replacement = string,
+            previousCursorPos = self.cursorPos,
+            nextCursorPos = self.cursorPos + #string
+        }
     end
-    self:setText(self.text:sub(0, self.cursorPos)..character..self.text:sub(self.cursorPos + 1))
-    self:setCursorPos(self.cursorPos + 1)
+    
+    self:setText(self.text:sub(0, self.cursorPos)..string..self.text:sub(self.cursorPos + 1))
+    self:setCursorPos(self.cursorPos + #string)
+
+    self:getAutoCompletionChoices()
+    self:showAutoCompletionChoice()
 end
 
 function Textbox:findStartOfCurrentWord()
     local spaceIndex
-    local nextSpaceIndex = self.textWithoutAutoComplete:find(" ")
+    local nextSpaceIndex = self.text:find(" ")
 
     while nextSpaceIndex and nextSpaceIndex <= self.cursorPos do
         spaceIndex = nextSpaceIndex
-        nextSpaceIndex = self.textWithoutAutoComplete:find(" ", spaceIndex + 1)
+        nextSpaceIndex = self.text:find(" ", spaceIndex + 1)
     end
 
     if not spaceIndex then
@@ -1545,7 +1692,7 @@ end
     insert characters as they are received at cursor position while incrementing cursor position
 ]]
 function Textbox.characterTyped(txb, event, character)
-    txb:insertCharacter(character)
+    txb:insert(character)
 end
 
 --[[
@@ -1566,6 +1713,9 @@ function Textbox.keyPressed(txb, event, key, isHeld)
         txb:setSelectionEnd(txb.cursorPos)
         txb:drawCursor()
     elseif keyName == "left" and txb.cursorPos > 0 then
+        txb:eraseAutoCompletionChoice()
+        txb.autoCompleting = false
+
         if shiftHeld then
             if not txb.selecting then
                 txb:setSelectionStart(txb.cursorPos)
@@ -1582,6 +1732,9 @@ function Textbox.keyPressed(txb, event, key, isHeld)
             txb:setCursorPos(txb.cursorPos - 1)
         end
     elseif keyName == "right" and txb.cursorPos <= #txb.text then
+        txb:eraseAutoCompletionChoice()
+        txb.autoCompleting = false
+
         if shiftHeld then
             if not txb.selecting then
                 txb:setSelectionStart(txb.cursorPos)
@@ -1598,80 +1751,139 @@ function Textbox.keyPressed(txb, event, key, isHeld)
             txb:setCursorPos(txb.cursorPos + 1)
         end
     elseif keyName == "up" then
-        local cursorX = txb:getCursorPosX()
-        local cursorY = txb:getCursorPosY()
-
-        if shiftHeld then
-            if not txb.selecting then
-                txb:setSelectionStart(txb.cursorPos)
-            end
-            txb:setCursorPosXY(cursorX, cursorY - 1)
-            txb:setSelectionEnd(txb.cursorPos)
-            txb:drawCursor()
-        elseif txb.selecting then
-            txb:setCursorPos(minSelection)
-            cursorX = txb:getCursorPosX()
-            cursorY = txb:getCursorPosY()
-            txb:setCursorPosXY(cursorX, cursorY - 1)
-            txb:eraseSelection()
-            txb:stopSelecting()
-            txb:drawCursor()
+        if txb.autoCompleting then
+            txb:eraseAutoCompletionChoice()
+            txb.currentChoiceIndex = (txb.currentChoiceIndex + #txb.currentAutoCompleteChoices) % #txb.currentAutoCompleteChoices + 1
+            txb:showAutoCompletionChoice()
         else
-            txb:setCursorPosXY(cursorX, cursorY - 1)
+            local cursorX = txb:getCursorPosX()
+            local cursorY = txb:getCursorPosY()
+
+            if shiftHeld then
+                if not txb.selecting then
+                    txb:setSelectionStart(txb.cursorPos)
+                end
+                txb:setCursorPosXY(cursorX, cursorY - 1)
+                txb:setSelectionEnd(txb.cursorPos)
+                txb:drawCursor()
+            elseif txb.selecting then
+                txb:setCursorPos(minSelection)
+                cursorX = txb:getCursorPosX()
+                cursorY = txb:getCursorPosY()
+                txb:setCursorPosXY(cursorX, cursorY - 1)
+                txb:eraseSelection()
+                txb:stopSelecting()
+                txb:drawCursor()
+            else
+                txb:setCursorPosXY(cursorX, cursorY - 1)
+            end
         end
     elseif keyName == "down" then
-        local cursorX = txb:getCursorPosX()
-        local cursorY = txb:getCursorPosY()
-
-        if shiftHeld then
-            if not txb.selecting then
-                txb:setSelectionStart(txb.cursorPos)
-            end
-            txb:setCursorPosXY(cursorX, cursorY + 1)
-            txb:setSelectionEnd(txb.cursorPos)
-            txb:drawCursor()
-        elseif txb.selecting then
-            txb:setCursorPos(maxSelection)
-            cursorX = txb:getCursorPosX()
-            cursorY = txb:getCursorPosY()
-            txb:setCursorPosXY(cursorX, cursorY + 1)
-            txb:eraseSelection()
-            txb:stopSelecting()
-            txb:drawCursor()
+        if txb.autoCompleting then
+            txb:eraseAutoCompletionChoice()
+            txb.currentChoiceIndex = (txb.currentChoiceIndex + 1) % #txb.currentAutoCompleteChoices + 1
+            txb:showAutoCompletionChoice()
         else
-            txb:setCursorPosXY(cursorX, cursorY + 1)
+            local cursorX = txb:getCursorPosX()
+            local cursorY = txb:getCursorPosY()
+
+            if shiftHeld then
+                if not txb.selecting then
+                    txb:setSelectionStart(txb.cursorPos)
+                end
+                txb:setCursorPosXY(cursorX, cursorY + 1)
+                txb:setSelectionEnd(txb.cursorPos)
+                txb:drawCursor()
+            elseif txb.selecting then
+                txb:setCursorPos(maxSelection)
+                cursorX = txb:getCursorPosX()
+                cursorY = txb:getCursorPosY()
+                txb:setCursorPosXY(cursorX, cursorY + 1)
+                txb:eraseSelection()
+                txb:stopSelecting()
+                txb:drawCursor()
+            else
+                txb:setCursorPosXY(cursorX, cursorY + 1)
+            end
         end
     elseif keyName == "enter" and not txb.enterSubmits then
         txb:eraseSelection()
         txb:eraseCursor()
-        txb:insertCharacter("\n")
+        if txb.autoCompleting then
+            txb:eraseAutoCompletionChoice()
+            txb.autoCompleting = false
+            txb:insert(txb.currentAutoCompleteChoices[txb.currentChoiceIndex])
+        else
+            txb:insert("\n")
+        end
     elseif keyName == "backspace" then
+        txb:eraseAutoCompletionChoice()
+        txb.autoCompleting = false
+
         if txb.selecting then
+            txb:addNewHistory()
+            txb.changeHistory[txb.historyIndex] = TextEdit:new {
+                index = minSelection + 1,
+                string = txb.text:sub(minSelection + 1, maxSelection),
+                previousCursorPos = txb.cursorPos,
+                nextCursorPos = minSelection,
+            }
+
             txb:setCursorPos(minSelection)
             txb:eraseSelection()
             txb:setText(txb.text:sub(0, minSelection)..txb.text:sub(maxSelection + 1))
             txb:stopSelecting()
             txb:drawCursor()
         elseif txb.cursorPos > 0 then
+            txb:addNewHistory()
+            txb.changeHistory[txb.historyIndex] = TextEdit:new {
+                index = txb.cursorPos,
+                string = txb.text:sub(txb.cursorPos, txb.cursorPos),
+                previousCursorPos = txb.cursorPos,
+                nextCursorPos = txb.cursorPos - 1,
+            }
+
             txb:eraseSelection()
             txb:eraseCursor()
             txb:setText(txb.text:sub(0, txb.cursorPos - 1)..txb.text:sub(txb.cursorPos + 1))
             txb:setCursorPos(txb.cursorPos - 1)
         end
     elseif keyName == "delete" then
+        txb:eraseAutoCompletionChoice()
+        txb.autoCompleting = false
+
         if txb.selecting then
+            txb:addNewHistory()
+            txb.changeHistory[txb.historyIndex] = TextEdit:new {
+                index = minSelection + 1,
+                string = txb.text:sub(minSelection + 1, maxSelection),
+                previousCursorPos = txb.cursorPos,
+                nextCursorPos = minSelection,
+            }
+
             txb:setCursorPos(minSelection)
             txb:eraseSelection()
             txb:setText(txb.text:sub(0, minSelection)..txb.text:sub(maxSelection + 1))
             txb:stopSelecting()
             txb:drawCursor()
         elseif txb.cursorPos < #txb.text then
+            txb:addNewHistory()
+            txb.changeHistory[txb.historyIndex] = TextEdit:new {
+                index = txb.cursorPos + 1,
+                string = txb.text:sub(txb.cursorPos + 1, txb.cursorPos + 1),
+                previousCursorPos = txb.cursorPos,
+                nextCursorPos = txb.cursorPos,
+            }
+
             txb:eraseSelection()
             txb:eraseCursor()
             txb:setText(txb.text:sub(0, txb.cursorPos)..txb.text:sub(txb.cursorPos + 2))
             txb:setCursorPos(txb.cursorPos)
         end
     elseif keyName == "home" then
+        txb:eraseAutoCompletionChoice()
+        txb.autoCompleting = false
+
         if shiftHeld then
             if not txb.selecting then
                 txb:setSelectionStart(txb.cursorPos)
@@ -1683,6 +1895,9 @@ function Textbox.keyPressed(txb, event, key, isHeld)
             txb:setCursorPos(txb.cursorPos - txb.cursorRowOffset)
         end
     elseif keyName == "end" then
+        txb:eraseAutoCompletionChoice()
+        txb.autoCompleting = false
+
         if shiftHeld then
             if not txb.selecting then
                 txb:setSelectionStart(txb.cursorPos)
@@ -1693,6 +1908,14 @@ function Textbox.keyPressed(txb, event, key, isHeld)
         else
             txb:setCursorPos(txb.cursorPos - txb.cursorRowOffset + #txb.textRows[txb.cursorRowIndex].text)
         end
+    elseif ctrlHeld and keyName == "z" then
+        txb:eraseAutoCompletionChoice()
+        txb.autoCompleting = false
+        txb:undo()
+    elseif ctrlHeld and keyName == "y" then
+        txb:eraseAutoCompletionChoice()
+        txb.autoCompleting = false
+        txb:redo()
     end
 end
 
