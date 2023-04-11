@@ -365,7 +365,7 @@ end
     remove element from previous parent and add to new parent, can also be nil to unparent entirely
 ]]
 function Element:setParent(parent)
-    self.globalX, self.globalyY = self:getGlobalPos(self.x, self.y)
+    self.globalX, self.globalY = self:getGlobalPos(self.x, self.y)
 
     if self.parent then
         for index, child in self.parent.children do
@@ -507,7 +507,7 @@ end
 --------------------------------
 
 Outline = Element:new {
-
+    class = "Outline",
 }
 
 function Outline:new(o)
@@ -544,6 +544,7 @@ end
 --------------------------------
 
 Canvas = Element:new {
+    class = "Canvas",
     backgroundColor = colors.white,
     currentColor = colors.black,
     maxUndo = 100,
@@ -1501,7 +1502,12 @@ function Textbox:setCursorPosXY(x, y)
     self:eraseSelection()
     self:eraseCursor()
 
-    self.cursorRowIndex = math.min(#self.textRows + self.textRows[#self.textRows].newLineTerm, math.max(1, y - 1 + self:getStartRowIndex()))
+    if #self.textRows ~= 0 then
+        self.cursorRowIndex = math.min(#self.textRows + self.textRows[#self.textRows].newLineTerm, math.max(1, y - 1 + self:getStartRowIndex()))
+    else
+        self.cursorRowIndex = 1
+    end
+
     self.cursorRowOffset = math.min(#self.textRows[self.cursorRowIndex].text, math.max(0, x - 2 + self:getStartSubstringIndex(self.cursorRowIndex)))
 
     self:computeCursorPos()
@@ -1709,7 +1715,7 @@ function Textbox.keyPressed(txb, event, key, isHeld)
 
     if ctrlHeld and keyName == "a" then
         txb:setSelectionStart(0)
-        txb:setCursorPos(#txb.text - 1)
+        txb:setCursorPos(#txb.text)
         txb:setSelectionEnd(txb.cursorPos)
         txb:drawCursor()
     elseif keyName == "left" and txb.cursorPos > 0 then
@@ -1949,6 +1955,109 @@ function Textbox.mouseDragged(txb, event, button, x, y)
         txb:setCursorPosXY(lx, ly)
         txb:setSelectionEnd(txb.cursorPos)
         txb:drawCursor()
+    end
+end
+
+Window = Element:new {
+    class = "Window",
+    titleTxt = nil,
+    contentElmnt = nil,
+    exitBtn = nil,
+    maximizeBtn = nil,
+    minimizeBtn = nil,
+    contents = nil,
+}
+
+function Window:new(o)
+    o = o or {}
+    o = Element:new(o)
+
+    setmetatable(o, self)
+    self.__index = self
+
+    o.titleTxt = o.titleTxt or Text:new {
+        name = o.name.."_titleTxt",
+        parent = o,
+        buffer = o.buffer,
+        width = o.width - 3,
+        text = "Window",
+    }
+
+    o.contentElmnt = o.contentElmnt or Element:new {
+        name = o.name.."_contentElmnt",
+        parent = o,
+        buffer = o.buffer,
+        x = 1,
+        y = 2,
+        width = o.width,
+        height = o.height - 1,
+        backgroundColor = colors.white,
+    }
+
+    o.exitBtn = Button:new {
+        name = o.name.."_exitBtn",
+        parent = o,
+        buffer = o.buffer,
+        x = o.width,
+        y = 1,
+        width = 1,
+        height = 1,
+        backgroundColor = colors.red,
+        text = "x",
+        onClickName = "exit",
+        onClick = function(btn)
+            btn.parent.exit()
+        end
+    }
+
+    o.maximizeBtn = Button:new {
+        name = o.name.."_maximizeBtn",
+        parent = o,
+        buffer = o.buffer,
+        x = o.width - 1,
+        y = 1,
+        width = 1,
+        height = 1,
+        backgroundColor = colors.lime,
+        text = "+",
+        onClickName = "maximize",
+        onClick = function(btn)
+            btn.parent.maximize()
+        end
+    }
+
+    o.minimizeBtn = Button:new {
+        name = o.name.."_minimizeBtn",
+        parent = o,
+        buffer = o.buffer,
+        x = o.width - 2,
+        y = 1,
+        width = 1,
+        height = 1,
+        backgroundColor = colors.orange,
+        text = "-",
+        onClickName = "minimize",
+        onClick = function(btn)
+            btn.parent.minimize()
+        end
+    }
+
+    o.contents = o.contents or {}
+    for _, content in ipairs(o.contents) do
+        content:setParent(o.contentElmnt)
+        content.buffer = o.contentElmnt
+    end
+
+    if o.name then
+        registerSelectionCallback("mouse_drag", o.titleTxt, o.mouseDrag, "mouseDrag")
+    end
+
+    return o
+end
+
+function Window.mouseDrag(titleTxt, event, button, x, y)
+    if button == 1 then
+        titleTxt.parent:setGlobalPos(x, y)
     end
 end
 

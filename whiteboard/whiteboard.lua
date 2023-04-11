@@ -10,6 +10,11 @@ local undoButton
 local redoButton
 local saveButton
 local loadButton
+local promptText
+local promptTextbox
+
+local whiteboardFolder = "whiteboards"
+local whiteboardExtension = ".wtbd"
 
 --ordered colors table with both name and color value available
 local orderedColors = {
@@ -30,7 +35,45 @@ local orderedColors = {
     {["name"] = "black",    ["color"] = colors.black},
 }
 
-function initializeElements()
+local function save(fileName)
+    local fullFileName = whiteboardFolder.."/"..fileName..whiteboardExtension
+    
+    local overwrite
+
+    if fs.exists(fullFileName) then
+        local confirmationRecieved = false
+
+        promptText:setText(fileName.." already exists. Overwrite?")
+
+        promptTextbox:setText("")
+        promptTextbox.allAutoCompleteChoices = {"yes", "no"}
+        promptTextbox.onEnter = function(txb)
+            if txb.text == "yes" or txb.text == "no" then
+                confirmationRecieved = true
+                overwrite = (txb.text == "yes")
+            end
+        end
+
+        repeat
+            buffer:draw()
+            parallel.waitForAny(handleInputEvents)
+        until confirmationRecieved
+    end
+
+    promptText:setText("")
+    promptText.visible = false
+
+    promptTextbox:setText("")
+    promptTextbox.allAutoCompleteChoices = {}
+    promptTextbox.visible = false
+
+    if not fs.exists(fullFileName) or overwrite then
+        local file = fs.open(fullFileName, "w")
+        file.write(textutils.serialise(whiteboard.cells))
+    end
+end
+
+local function initializeElements()
     local device = peripheral.find("monitor")
 
     if not device then
@@ -67,7 +110,7 @@ function initializeElements()
         parent = buffer,
         buffer = buffer,
         text = "pen",
-        x = buffer.width - 3,
+        x = buffer.width - 12,
         y = buffer.height,
         width = 3,
         height =  1,
@@ -82,7 +125,7 @@ function initializeElements()
         parent = buffer,
         buffer = buffer,
         text = "fill",
-        x = buffer.width - 8,
+        x = buffer.width - 17,
         y = buffer.height,
         width = 4,
         height =  1,
@@ -134,6 +177,56 @@ function initializeElements()
         onClickName = "redo",
         onClick = function(self)
             whiteboard:redo()
+        end,
+    }
+
+    promptText = Text:new {
+        name = "promptText",
+        parent = buffer,
+        buffer = buffer,
+        x = math.ceil(buffer.width / 10),
+        y = math.floor(buffer.height / 2) - 2,
+        width = math.floor(8 * buffer.width / 10),
+        height = 1,
+        visible = false,
+    }
+
+    promptTextbox = Textbox:new {
+        name = "prompt",
+        parent = buffer,
+        buffer = buffer,
+        x = promptText.x,
+        y = promptText.y + 1,
+        width = promptText.width,
+        height = 3,
+        padding = 1,
+        backgroundColor = colors.red,
+        textColor = colors.orange,
+        cursorBackgroundColor = colors.white,
+        cursorTextColor = colors.red,
+        selectionBackgroundColor = colors.yellow,
+        selectionTextColor = colors.red,
+        visible = false,
+    }
+
+    saveButton = Button:new {
+        name = "save",
+        parent = buffer,
+        buffer = buffer,
+        text = "save",
+        x = buffer.width - 4,
+        y = buffer.height,
+        width = 4,
+        height = 1,
+        onClickName = "save",
+        onClick = function(self)
+            promptText.visible = true
+            promptText:setText("Enter filename to save whiteboard as:")
+
+            promptTextbox.visible = true
+            promptTextbox.onEnter = function(txb)
+                save(txb.text)
+            end
         end,
     }
 end
